@@ -18,6 +18,7 @@
 #include <functional>
 #include <iostream>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -47,7 +48,7 @@ template <OAHashmap_Type Key> struct PairSet
   Key first;
   EmptyType second [[no_unique_address]];
   PairSet() = default;
-  explicit PairSet(Key key) : first(key) {}
+  explicit PairSet(Key key, EmptyType) : first(key) {}
   bool operator==(const PairSet& other) { return first == first; }
   bool operator!=(const PairSet& other) { return ! (other == *this); }
 };
@@ -62,6 +63,8 @@ template <typename Container> struct Iterator
   using difference_type   = typename Container::difference_type;
   using pointer           = key_type*;
   using reference         = key_type&;
+  using const_pointer     = const key_type*;
+  using const_reference   = const key_type&;
   using iterator_category = std::forward_iterator_tag;
 
   explicit Iterator(Container* hashmap, size_type index)
@@ -88,7 +91,15 @@ template <typename Container> struct Iterator
   }
 
   reference operator*() const
-    requires(std::is_same_v<mapped_type, EmptyType>)
+    requires(std::is_same_v<mapped_type, EmptyType> &&
+             ! std::is_const_v<Container>)
+  {
+    return hashmap_->buckets_[index_].first;
+  }
+
+  const_reference operator*() const
+    requires(std::is_same_v<mapped_type, EmptyType> &&
+             std::is_const_v<Container>)
   {
     return hashmap_->buckets_[index_].first;
   }
@@ -100,15 +111,23 @@ template <typename Container> struct Iterator
     return &hashmap_->buckets_[index_].first;
   }
 
-  const pointer operator->() const
+  const_pointer operator->() const
     requires(std::is_same_v<mapped_type, EmptyType> &&
              std::is_const_v<Container>)
   {
     return &hashmap_->buckets_[index_].first;
   }
 
-  value_type operator*() const
-    requires(! std::is_same_v<mapped_type, EmptyType>)
+  value_type& operator*() const
+    requires(! std::is_same_v<mapped_type, EmptyType> &&
+             ! std::is_const_v<Container>)
+  {
+    return hashmap_->buckets_[index_];
+  }
+
+  const value_type& operator*() const
+    requires(! std::is_same_v<mapped_type, EmptyType> &&
+             std::is_const_v<Container>)
   {
     return hashmap_->buckets_[index_];
   }
@@ -235,6 +254,18 @@ public:
   std::pair<iterator, bool> insert(value_type&& value)
   {
     return _emplace(value.first, std::move(value.second));
+  }
+
+  std::pair<iterator, bool> insert(const key_type& key)
+    requires(std::is_same_v<mapped_type, EmptyType>)
+  {
+    return _emplace(key);
+  }
+
+  std::pair<iterator, bool> insert(key_type&& key)
+    requires(std::is_same_v<mapped_type, EmptyType>)
+  {
+    return _emplace(std::move(key));
   }
 
   template <typename P>
@@ -483,7 +514,8 @@ public:
 private:
   template <typename K, typename... Args>
   std::pair<iterator, bool> _emplace(const K& key, Args&&... args)
-    requires std::is_convertible_v<K, key_type>
+    requires(std::is_convertible_v<K, key_type> &&
+             ! std::is_same_v<mapped_type, EmptyType>)
   {
     _validateKey(key);
     reserve(size_ + 1);
@@ -491,8 +523,32 @@ private:
     {
       if (key_equal()(buckets_[index].first, empty_key_))
       {
-        buckets_[index].second = mapped_type(std::forward<Args>(args)...);
+        buckets_[index].second = mapped_type(std::forward<Args...>(args)...);
         buckets_[index].first  = key;
+        ++size_;
+        return std::make_pair(iterator(this, index), true);
+      }
+      else if (key_equal()(buckets_[index].first, key))
+      {
+        return std::make_pair(iterator(this, index), false);
+      }
+    }
+  }
+
+  template <typename... Args>
+  std::pair<iterator, bool> _emplace(Args&&... args)
+    requires(std::is_constructible_v<key_type, Args...> &&
+             std::is_same_v<mapped_type, EmptyType>)
+  {
+    key_type key = key_type(std::forward<Args...>(args)...);
+    _validateKey(key);
+    reserve(size_ + 1);
+    for (size_type index = _hash(key);; index = _next(index))
+    {
+      if (key_equal()(buckets_[index].first, empty_key_))
+      {
+        buckets_[index].second = mapped_type();
+        buckets_[index].first  = key_type(std::forward<Args>(args)...);
         ++size_;
         return std::make_pair(iterator(this, index), true);
       }
