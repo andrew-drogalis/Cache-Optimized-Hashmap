@@ -53,7 +53,7 @@ template <OAHashmap_Type Key> struct PairHashSet
   bool operator!=(const PairHashSet& other) { return ! (*this == other); }
 };
 
-template <typename Container> struct Iterator
+template <typename Container> struct HashIterator
 {
   using key_type          = typename Container::key_type;
   using mapped_type       = typename Container::mapped_type;
@@ -67,20 +67,20 @@ template <typename Container> struct Iterator
   using const_reference   = const key_type&;
   using iterator_category = std::forward_iterator_tag;
 
-  explicit Iterator(Container* hashmap, size_type index)
+  explicit HashIterator(Container* hashmap, size_type index)
       : hashmap_(hashmap), index_(index)
   {
     _nextValidIndex();
   }
 
-  bool operator==(const Iterator& other) const
+  bool operator==(const HashIterator& other) const
   {
     return other.hashmap_ == hashmap_ && other.index_ == index_;
   }
 
-  bool operator!=(const Iterator& other) const { return ! (*this == other); }
+  bool operator!=(const HashIterator& other) const { return ! (*this == other); }
 
-  Iterator& operator++()
+  HashIterator& operator++()
   {
     if (index_ < hashmap_->buckets_.size())
     {
@@ -178,14 +178,14 @@ public:
   using allocator_type  = Allocator;
   using difference_type = std::ptrdiff_t;
   using buckets         = std::vector<value_type, Allocator>;
-  using iterator        = Iterator<OAHashmap>;
-  using const_iterator  = Iterator<const OAHashmap>;
+  using iterator        = HashIterator<OAHashmap>;
+  using const_iterator  = HashIterator<const OAHashmap>;
 
 private:
   key_type empty_key_;
   buckets buckets_;
   size_type size_ {0};
-  float load_factor_ = 0.5;
+  float load_factor_ = 0.4;
   friend iterator;
   friend const_iterator;
 
@@ -194,7 +194,9 @@ public:
             const Allocator& allocator = Allocator())
       : empty_key_(empty_key), buckets_(allocator)
   {
-    buckets_.resize(count, value_type(empty_key_, mapped_type()));
+    double mult       = 1.0 / load_factor_;
+    size_type newCount = static_cast<double>(count) * mult;
+    buckets_.resize(newCount, value_type(empty_key_, mapped_type()));
   }
 
   // No memory allocated, this is redundant
