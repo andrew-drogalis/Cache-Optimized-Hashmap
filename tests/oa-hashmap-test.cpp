@@ -26,18 +26,27 @@ int main(int argc, char* argv[])
     assert(! hashmap2.empty());
     assert(hashmap2.size() == 1);
     assert(hashmap2[1] == 1);
-
+  }
+  {
+    dro::HashMap<int, int> hashmap(10, 0);
+    hashmap[1] = 1;
     dro::HashMap<int, int> hashmap3(std::move(hashmap));
     assert(! hashmap2.empty());
-    assert(hashmap2.size() == 1);
-    assert(hashmap2[1] == 1);
-
+    assert(hashmap3.size() == 1);
+    assert(hashmap3[1] == 1);
+  }
+  {
+    dro::HashMap<int, int> hashmap(10, 0);
+    hashmap[1] = 1;
     dro::HashMap<int, int> hashmap4(10, 0);
     hashmap4.operator=(hashmap);
     assert(! hashmap4.empty());
     assert(hashmap4.size() == 1);
     assert(hashmap4[1] == 1);
-
+  }
+  {
+    dro::HashMap<int, int> hashmap(10, 0);
+    hashmap[1] = 1;
     dro::HashMap<int, int> hashmap5(10, 0);
     hashmap5.operator=(std::move(hashmap));
     assert(! hashmap5.empty());
@@ -50,24 +59,24 @@ int main(int argc, char* argv[])
     dro::HashMap<int, int> hashmap(10, 0);
     const auto& chashmap = hashmap;
 
-    assert(hashmap.begin() == hm.end());
-    assert(chashmap.begin() == chm.end());
-    assert(hashmap.cbegin() == hm.cend());
-    assert(hashmap.cbegin() == chm.begin());
-    assert(hashmap.cend() == chm.end());
+    assert(hashmap.begin() == hashmap.end());
+    assert(chashmap.begin() == chashmap.end());
+    assert(hashmap.cbegin() == hashmap.cend());
+    assert(hashmap.cbegin() == chashmap.begin());
+    assert(hashmap.cend() == chashmap.end());
 
-    assert(! (hashmap.begin() != hm.end()));
-    assert(! (chashmap.begin() != chm.end()));
-    assert(! (hashmap.cbegin() != hm.cend()));
-    assert(! (hashmap.cbegin() != chm.begin()));
-    assert(! (hashmap.cend() != chm.end()));
+    assert(! (hashmap.begin() != hashmap.end()));
+    assert(! (chashmap.begin() != chashmap.end()));
+    assert(! (hashmap.cbegin() != hashmap.cend()));
+    assert(! (hashmap.cbegin() != chashmap.begin()));
+    assert(! (hashmap.cend() != chashmap.end()));
 
     for (int i = 1; i < 100; ++i) { hashmap[i] = i; }
 
     int sum {};
     for (auto it : hashmap) { sum += it.first; }
     assert(sum == 4950);
-    assert(std::all_of(hashmap.begin(), hm.end(),
+    assert(std::all_of(hashmap.begin(), hashmap.end(),
                        [](const auto& item) { return item.second > 0; }));
   }
 
@@ -99,8 +108,8 @@ int main(int argc, char* argv[])
     auto res = hashmap.insert({1, 1});
     assert(! hashmap.empty());
     assert(hashmap.size() == 1);
-    assert(hashmap.begin() != hm.end());
-    assert(hashmap.cbegin() != hm.cend());
+    assert(hashmap.begin() != hashmap.end());
+    assert(hashmap.cbegin() != hashmap.cend());
     assert(res.first != hashmap.end());
     assert(res.first->first == 1);
     assert(res.first->second == 1);
@@ -119,8 +128,8 @@ int main(int argc, char* argv[])
     auto res = hashmap.emplace(1, 1);
     assert(! hashmap.empty());
     assert(hashmap.size() == 1);
-    assert(hashmap.begin() != hm.end());
-    assert(hashmap.cbegin() != hm.cend());
+    assert(hashmap.begin() != hashmap.end());
+    assert(hashmap.cbegin() != hashmap.cend());
     assert(res.first != hashmap.end());
     assert(res.first->first == 1);
     assert(res.first->second == 1);
@@ -139,8 +148,8 @@ int main(int argc, char* argv[])
     hashmap.erase(res.first);
     assert(hashmap.empty());
     assert(hashmap.size() == 0);
-    assert(hashmap.begin() == hm.end());
-    assert(hashmap.cbegin() == hm.cend());
+    assert(hashmap.begin() == hashmap.end());
+    assert(hashmap.cbegin() == hashmap.cend());
   }
 
   {
@@ -150,8 +159,8 @@ int main(int argc, char* argv[])
     assert(hashmap.erase(1) == 1);
     assert(hashmap.empty());
     assert(hashmap.size() == 0);
-    assert(hashmap.begin() == hm.end());
-    assert(hashmap.cbegin() == hm.cend());
+    assert(hashmap.begin() == hashmap.end());
+    assert(hashmap.cbegin() == hashmap.cend());
   }
 
   {
@@ -162,8 +171,8 @@ int main(int argc, char* argv[])
     assert(hashmap.erase(1) == 1);
     assert(hashmap.empty());
     assert(hashmap.size() == 0);
-    assert(hashmap.begin() == hm.end());
-    assert(hashmap.cbegin() == hm.cend());
+    assert(hashmap.begin() == hashmap.end());
+    assert(hashmap.cbegin() == hashmap.cend());
   }
 
   {
@@ -224,8 +233,8 @@ int main(int argc, char* argv[])
     hashmap[1] = 1;
     assert(! hashmap.empty());
     assert(hashmap.size() == 1);
-    assert(hashmap.begin() != hm.end());
-    assert(hashmap.cbegin() != hm.cend());
+    assert(hashmap.begin() != hashmap.end());
+    assert(hashmap.cbegin() != hashmap.cend());
     assert(hashmap[1] == 1);
   }
 

@@ -35,8 +35,8 @@ int setTest()
     int sum {};
     for (auto it : hashset) { sum += it; }
     assert(sum == 4950);
-    assert(std::all_of(hashashsetap.begin(), hm.end(),
-                       [](const auto& item) { return item.second > 0; }));
+    assert(std::all_of(hashset.begin(), hashset.end(),
+                       [](const auto& item) { return item > 0; }));
   }
 
   // Capacity
@@ -58,8 +58,8 @@ int setTest()
     hashset.clear();
     assert(hashset.empty());
     assert(hashset.size() == 0);
-    assert(hashset.begin() == hm.end());
-    assert(hashset.cbegin() == hm.cend());
+    assert(hashset.begin() == hashset.end());
+    assert(hashset.cbegin() == hashset.cend());
   }
 
   {
@@ -67,8 +67,8 @@ int setTest()
     auto res = hashset.insert(1);
     assert(! hashset.empty());
     assert(hashset.size() == 1);
-    assert(hashset.begin() != hm.end());
-    assert(hashset.cbegin() != hm.cend());
+    assert(hashset.begin() != hashset.end());
+    assert(hashset.cbegin() != hashset.cend());
     assert(res.first != hashset.end());
     assert(*(res.first) == 1);
     assert(res.second);
@@ -84,8 +84,8 @@ int setTest()
     auto res = hashset.emplace(1);
     assert(! hashset.empty());
     assert(hashset.size() == 1);
-    assert(hashset.begin() != hm.end());
-    assert(hashset.cbegin() != hm.cend());
+    assert(hashset.begin() != hashset.end());
+    assert(hashset.cbegin() != hashset.cend());
     assert(res.first != hashset.end());
     assert(*(res.first) == 1);
     assert(res.second);
