@@ -39,18 +39,18 @@ concept OAHashmap_NoThrow =
     ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
      (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>));
 
-struct EmptyType
+struct HashSetEmptyType
 {
 };
 
-template <OAHashmap_Type Key> struct PairSet
+template <OAHashmap_Type Key> struct PairHashSet
 {
   Key first;
-  EmptyType second [[no_unique_address]];
-  PairSet() = default;
-  explicit PairSet(Key key, EmptyType) : first(key) {}
-  bool operator==(const PairSet& other) { return first == first; }
-  bool operator!=(const PairSet& other) { return ! (other == *this); }
+  HashSetEmptyType second [[no_unique_address]];
+  PairHashSet() = default;
+  explicit PairHashSet(Key key, HashSetEmptyType) : first(key) {}
+  bool operator==(const PairHashSet& other) { return first == first; }
+  bool operator!=(const PairHashSet& other) { return ! (*this == other); }
 };
 
 template <typename Container> struct Iterator
@@ -78,7 +78,7 @@ template <typename Container> struct Iterator
     return other.hashmap_ == hashmap_ && other.index_ == index_;
   }
 
-  bool operator!=(const Iterator& other) const { return ! (other == *this); }
+  bool operator!=(const Iterator& other) const { return ! (*this == other); }
 
   Iterator& operator++()
   {
@@ -91,56 +91,56 @@ template <typename Container> struct Iterator
   }
 
   reference operator*() const
-    requires(std::is_same_v<mapped_type, EmptyType> &&
+    requires(std::is_same_v<mapped_type, HashSetEmptyType> &&
              ! std::is_const_v<Container>)
   {
     return hashmap_->buckets_[index_].first;
   }
 
   const_reference operator*() const
-    requires(std::is_same_v<mapped_type, EmptyType> &&
+    requires(std::is_same_v<mapped_type, HashSetEmptyType> &&
              std::is_const_v<Container>)
   {
     return hashmap_->buckets_[index_].first;
   }
 
   pointer operator->() const
-    requires(std::is_same_v<mapped_type, EmptyType> &&
+    requires(std::is_same_v<mapped_type, HashSetEmptyType> &&
              ! std::is_const_v<Container>)
   {
     return &hashmap_->buckets_[index_].first;
   }
 
   const_pointer operator->() const
-    requires(std::is_same_v<mapped_type, EmptyType> &&
+    requires(std::is_same_v<mapped_type, HashSetEmptyType> &&
              std::is_const_v<Container>)
   {
     return &hashmap_->buckets_[index_].first;
   }
 
   value_type& operator*() const
-    requires(! std::is_same_v<mapped_type, EmptyType> &&
+    requires(! std::is_same_v<mapped_type, HashSetEmptyType> &&
              ! std::is_const_v<Container>)
   {
     return hashmap_->buckets_[index_];
   }
 
   const value_type& operator*() const
-    requires(! std::is_same_v<mapped_type, EmptyType> &&
+    requires(! std::is_same_v<mapped_type, HashSetEmptyType> &&
              std::is_const_v<Container>)
   {
     return hashmap_->buckets_[index_];
   }
 
   const value_type* operator->() const
-    requires(! std::is_same_v<mapped_type, EmptyType> &&
+    requires(! std::is_same_v<mapped_type, HashSetEmptyType> &&
              std::is_const_v<Container>)
   {
     return &hashmap_->buckets_[index_];
   }
 
   value_type* operator->() const
-    requires(! std::is_same_v<mapped_type, EmptyType> &&
+    requires(! std::is_same_v<mapped_type, HashSetEmptyType> &&
              ! std::is_const_v<Container>)
   {
     return &hashmap_->buckets_[index_];
@@ -257,13 +257,13 @@ public:
   }
 
   std::pair<iterator, bool> insert(const key_type& key)
-    requires(std::is_same_v<mapped_type, EmptyType>)
+    requires(std::is_same_v<mapped_type, HashSetEmptyType>)
   {
     return _emplace(key);
   }
 
   std::pair<iterator, bool> insert(key_type&& key)
-    requires(std::is_same_v<mapped_type, EmptyType>)
+    requires(std::is_same_v<mapped_type, HashSetEmptyType>)
   {
     return _emplace(std::move(key));
   }
@@ -337,7 +337,7 @@ public:
 
   // Get Values
   mapped_type& at(const key_type& key)
-    requires(! std::is_same_v<mapped_type, EmptyType>)
+    requires(! std::is_same_v<mapped_type, HashSetEmptyType>)
   {
     size_type index = _find(key);
     if (index != buckets_.size())
@@ -348,7 +348,7 @@ public:
   }
 
   const mapped_type& at(const key_type& key) const
-    requires(! std::is_same_v<mapped_type, EmptyType>)
+    requires(! std::is_same_v<mapped_type, HashSetEmptyType>)
   {
     size_type index = _find(key);
     if (index != buckets_.size())
@@ -360,7 +360,7 @@ public:
 
   template <typename K>
   mapped_type& at(const K& x)
-    requires(! std::is_same_v<mapped_type, EmptyType> &&
+    requires(! std::is_same_v<mapped_type, HashSetEmptyType> &&
              std::is_convertible_v<K, key_type>)
   {
     size_type index = _find(x);
@@ -373,7 +373,7 @@ public:
 
   template <typename K>
   const mapped_type& at(const K& x) const
-    requires(! std::is_same_v<mapped_type, EmptyType> &&
+    requires(! std::is_same_v<mapped_type, HashSetEmptyType> &&
              std::is_convertible_v<K, key_type>)
   {
     size_type index = _find(x);
@@ -385,7 +385,7 @@ public:
   }
 
   mapped_type& operator[](const key_type& key)
-    requires(! std::is_same_v<mapped_type, EmptyType>)
+    requires(! std::is_same_v<mapped_type, HashSetEmptyType>)
   {
     size_type index = _find(key);
     if (index != buckets_.size())
@@ -397,7 +397,7 @@ public:
   }
 
   mapped_type& operator[](key_type&& key)
-    requires(! std::is_same_v<mapped_type, EmptyType>)
+    requires(! std::is_same_v<mapped_type, HashSetEmptyType>)
   {
     size_type index = _find(key);
     if (index != buckets_.size())
@@ -410,7 +410,7 @@ public:
 
   template <typename K>
   mapped_type& operator[](K&& x)
-    requires(! std::is_same_v<mapped_type, EmptyType> &&
+    requires(! std::is_same_v<mapped_type, HashSetEmptyType> &&
              std::is_convertible_v<K, key_type>)
   {
     size_type index = _find(x);
@@ -515,7 +515,8 @@ private:
   template <typename K, typename... Args>
   std::pair<iterator, bool> _emplace(const K& key, Args&&... args)
     requires(std::is_convertible_v<K, key_type> &&
-             ! std::is_same_v<mapped_type, EmptyType>)
+             ! std::is_same_v<mapped_type, HashSetEmptyType> &&
+             std::is_constructible_v<mapped_type, Args...>)
   {
     _validateKey(key);
     reserve(size_ + 1);
@@ -538,7 +539,7 @@ private:
   template <typename... Args>
   std::pair<iterator, bool> _emplace(Args&&... args)
     requires(std::is_constructible_v<key_type, Args...> &&
-             std::is_same_v<mapped_type, EmptyType>)
+             std::is_same_v<mapped_type, HashSetEmptyType>)
   {
     key_type key = key_type(std::forward<Args...>(args)...);
     _validateKey(key);
@@ -548,7 +549,7 @@ private:
       if (key_equal()(buckets_[index].first, empty_key_))
       {
         buckets_[index].second = mapped_type();
-        buckets_[index].first  = key_type(std::forward<Args>(args)...);
+        buckets_[index].first  = key_type(std::forward<Args...>(args)...);
         ++size_;
         return std::make_pair(iterator(this, index), true);
       }
@@ -649,14 +650,14 @@ public:
 
 template <details::OAHashmap_Type Key, typename Hash = std::hash<Key>,
           typename KeyEqual  = std::equal_to<Key>,
-          typename Allocator = std::allocator<details::PairSet<Key>>>
+          typename Allocator = std::allocator<details::PairHashSet<Key>>>
 class HashSet
-    : public details::OAHashmap<Key, details::EmptyType, details::PairSet<Key>,
+    : public details::OAHashmap<Key, details::HashSetEmptyType, details::PairHashSet<Key>,
                                 Hash, KeyEqual, Allocator>
 {
   using size_type = std::size_t;
   using base_type =
-      details::OAHashmap<Key, details::EmptyType, details::PairSet<Key>, Hash,
+      details::OAHashmap<Key, details::HashSetEmptyType, details::PairHashSet<Key>, Hash,
                          KeyEqual, Allocator>;
 
 public:
