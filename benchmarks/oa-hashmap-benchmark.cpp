@@ -14,11 +14,11 @@
 
 int main(int argc, char* argv[])
 {
-  size_t size  = 10'000'000;
-  size_t iters = 100'000'000;
+  size_t size  = 1'000'000;
+  size_t iters = 10'000'000;
 
   {
-    dro::HashMap<int, int> hashmap {2 * size, 0};
+    dro::HashMap<int, int> hashmap {size, 0};
     std::cout << "Dro Hashmap: \n";
 
     std::minstd_rand generator(0);

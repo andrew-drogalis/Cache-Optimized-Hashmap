@@ -1,0 +1,6 @@
+Dro Hashmap: 
+Mean: 67 ns/iter
+std::unordered_map: 
+Mean: 179 ns/iter
+
+
