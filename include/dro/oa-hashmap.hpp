@@ -8,19 +8,16 @@
 #ifndef DRO_OA_HASHMAP
 #define DRO_OA_HASHMAP
 
-#include <algorithm>
-#include <cassert>
-#include <concepts>
-#include <csignal>
-#include <cstddef>
-#include <cstdint>
-#include <cstdlib>
-#include <functional>
-#include <iostream>
-#include <stdexcept>
-#include <type_traits>
-#include <utility>
-#include <vector>
+#include <algorithm>  // for max
+#include <concepts>   // for requires
+#include <cstddef>    // for size_t, ptrdiff_t
+#include <functional> // for equal_to, hash
+#include <iterator>   // for pair, forward_iterator_tag
+#include <stdexcept>  // for out_of_range, invalid_argument
+#include <string_view>// for hash
+#include <type_traits>// for std::is_default_constructible
+#include <utility>    // for pair, forward, make_pair
+#include <vector>     // for allocator, vector
 
 namespace dro
 {
@@ -78,7 +75,10 @@ template <typename Container> struct HashIterator
     return other.hashmap_ == hashmap_ && other.index_ == index_;
   }
 
-  bool operator!=(const HashIterator& other) const { return ! (*this == other); }
+  bool operator!=(const HashIterator& other) const
+  {
+    return ! (*this == other);
+  }
 
   HashIterator& operator++()
   {
@@ -194,7 +194,7 @@ public:
             const Allocator& allocator = Allocator())
       : empty_key_(empty_key), buckets_(allocator)
   {
-    double mult       = 1.0 / load_factor_;
+    double mult        = 1.0 / load_factor_;
     size_type newCount = static_cast<double>(count) * mult;
     buckets_.resize(newCount, value_type(empty_key_, mapped_type()));
   }
@@ -653,14 +653,14 @@ public:
 template <details::OAHashmap_Type Key, typename Hash = std::hash<Key>,
           typename KeyEqual  = std::equal_to<Key>,
           typename Allocator = std::allocator<details::PairHashSet<Key>>>
-class HashSet
-    : public details::OAHashmap<Key, details::HashSetEmptyType, details::PairHashSet<Key>,
-                                Hash, KeyEqual, Allocator>
+class HashSet : public details::OAHashmap<Key, details::HashSetEmptyType,
+                                          details::PairHashSet<Key>, Hash,
+                                          KeyEqual, Allocator>
 {
   using size_type = std::size_t;
   using base_type =
-      details::OAHashmap<Key, details::HashSetEmptyType, details::PairHashSet<Key>, Hash,
-                         KeyEqual, Allocator>;
+      details::OAHashmap<Key, details::HashSetEmptyType,
+                         details::PairHashSet<Key>, Hash, KeyEqual, Allocator>;
 
 public:
   explicit HashSet(size_type count, Key empty_key,
