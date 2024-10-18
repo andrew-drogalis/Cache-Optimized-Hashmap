@@ -190,13 +190,11 @@ private:
   friend const_iterator;
 
 public:
-  OAHashmap(size_type count, key_type empty_key,
+  OAHashmap(key_type empty_key, size_type count,
             const Allocator& allocator = Allocator())
       : empty_key_(empty_key), buckets_(allocator)
   {
-    double mult        = 1.0 / load_factor_;
-    size_type newCount = static_cast<double>(count) * mult;
-    buckets_.resize(newCount, value_type(empty_key_, mapped_type()));
+    buckets_.resize(count, value_type(empty_key_, mapped_type()));
   }
 
   // No memory allocated, this is redundant
@@ -248,14 +246,14 @@ public:
     size_ = 0;
   }
 
-  std::pair<iterator, bool> insert(const value_type& value)
+  std::pair<iterator, bool> insert(const value_type& pair)
   {
-    return _emplace(value.first, value.second);
+    return _emplace(pair.first, pair.second);
   }
 
-  std::pair<iterator, bool> insert(value_type&& value)
+  std::pair<iterator, bool> insert(value_type&& pair)
   {
-    return _emplace(value.first, std::move(value.second));
+    return _emplace(pair.first, std::move(pair.second));
   }
 
   std::pair<iterator, bool> insert(const key_type& key)
@@ -466,6 +464,39 @@ public:
     return count(x);
   }
 
+  std::pair<iterator, iterator> equal_range(const key_type& key)
+  {
+    auto first  = find(key);
+    auto second = first;
+    return {first, ++second};
+  }
+
+  std::pair<const_iterator, const_iterator> equal_range(
+      const key_type& key) const
+  {
+    auto first  = find(key);
+    auto second = first;
+    return {first, ++second};
+  }
+
+  template <typename K>
+    requires std::is_convertible_v<K, key_type>
+  std::pair<iterator, iterator> equal_range(const K& x)
+  {
+    auto first  = find(x);
+    auto second = first;
+    return {first, ++second};
+  }
+
+  template <typename K>
+    requires std::is_convertible_v<K, key_type>
+  std::pair<const_iterator, const_iterator> equal_range(const K& x) const
+  {
+    auto first  = find(x);
+    auto second = first;
+    return {first, ++second};
+  }
+
   // Bucket Interface
   [[nodiscard]] size_type bucket_count() const { return buckets_.size(); }
 
@@ -493,7 +524,7 @@ public:
     double mult       = 1.0 / load_factor_;
     size_type newSize = static_cast<double>(size_) * mult;
     count             = std::max(count, newSize);
-    OAHashmap other(count, empty_key_, get_allocator());
+    OAHashmap other(empty_key_, count, get_allocator());
     for (auto it = begin(); it != end(); ++it) { other.insert(*it); }
     swap(other);
   }
@@ -509,9 +540,9 @@ public:
   }
 
   // Observers
-  hasher hash_function() const { return hasher(); }
+  [[nodiscard]] hasher hash_function() const { return hasher(); }
 
-  key_equal key_eq() const { return key_equal(); }
+  [[nodiscard]] key_equal key_eq() const { return key_equal(); }
 
 private:
   template <typename K, typename... Args>
@@ -643,9 +674,9 @@ class HashMap : public details::OAHashmap<Key, Value, std::pair<Key, Value>,
                                        KeyEqual, Allocator>;
 
 public:
-  explicit HashMap(size_type count, Key empty_key,
+  explicit HashMap(Key empty_key, size_type count = 1,
                    const Allocator& allocator = Allocator())
-      : base_type(count, empty_key, allocator)
+      : base_type(empty_key, count, allocator)
   {
   }
 };
@@ -663,9 +694,9 @@ class HashSet : public details::OAHashmap<Key, details::HashSetEmptyType,
                          details::PairHashSet<Key>, Hash, KeyEqual, Allocator>;
 
 public:
-  explicit HashSet(size_type count, Key empty_key,
+  explicit HashSet(Key empty_key, size_type count = 1,
                    const Allocator& allocator = Allocator())
-      : base_type(count, empty_key, allocator)
+      : base_type(empty_key, count, allocator)
   {
   }
 };
