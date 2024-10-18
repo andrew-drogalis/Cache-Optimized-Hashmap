@@ -12,8 +12,8 @@
 int main(int argc, char* argv[])
 {
   // 16 Initial Capacity and empty_key = 0
-  dro::HashMap<int, int> hashmap(16, std::numeric_limits<int>::max());
-  dro::HashSet<int> hashset(16, std::numeric_limits<int>::max());
+  dro::HashMap<int, int> hashmap(std::numeric_limits<int>::max(), 16);
+  dro::HashSet<int> hashset(std::numeric_limits<int>::max(), 16);
 
   std::array<int, 10> arr = {0, 0, 0, 3, 3, 4, 4, 5, 9, 9};
   // Count num of elements in array

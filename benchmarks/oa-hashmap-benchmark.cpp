@@ -18,7 +18,7 @@ int main(int argc, char* argv[])
   size_t iters = 10'000'000;
 
   {
-    dro::HashMap<int, int> hashmap {size, 0};
+    dro::HashMap<int, int> hashmap {0, size};
     std::cout << "Dro Hashmap: \n";
 
     std::minstd_rand generator(0);
