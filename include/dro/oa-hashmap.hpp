@@ -275,9 +275,18 @@ public:
     return _emplace(value.first, std::move(value.second));
   }
 
-  template <typename... Args> std::pair<iterator, bool> emplace(Args&&... args)
+  template <typename... Args>
+  std::pair<iterator, bool> emplace(Args&&... args)
+    requires(! std::is_same_v<mapped_type, HashSetEmptyType>)
   {
     return _emplace(std::forward<Args>(args)...);
+  }
+
+  template <typename... Args>
+  std::pair<iterator, bool> emplace(Args&&... args)
+    requires(std::is_same_v<mapped_type, HashSetEmptyType>)
+  {
+    return _emplaceSet(std::forward<Args>(args)...);
   }
 
   iterator erase(iterator it)
@@ -548,8 +557,7 @@ private:
   template <typename K, typename... Args>
   std::pair<iterator, bool> _emplace(const K& key, Args&&... args)
     requires(std::is_convertible_v<K, key_type> &&
-             ! std::is_same_v<mapped_type, HashSetEmptyType> &&
-             std::is_constructible_v<mapped_type, Args...>)
+             std::is_constructible_v<mapped_type, Args && ...>)
   {
     _validateKey(key);
     reserve(size_ + 1);
@@ -557,7 +565,7 @@ private:
     {
       if (key_equal()(buckets_[index].first, empty_key_))
       {
-        buckets_[index].second = mapped_type(std::forward<Args...>(args)...);
+        buckets_[index].second = mapped_type(std::forward<Args>(args)...);
         buckets_[index].first  = key;
         ++size_;
         return std::make_pair(iterator(this, index), true);
@@ -570,27 +578,12 @@ private:
   }
 
   template <typename... Args>
-  std::pair<iterator, bool> _emplace(Args&&... args)
-    requires(std::is_constructible_v<key_type, Args...> &&
+  std::pair<iterator, bool> _emplaceSet(Args&&... args)
+    requires(std::is_constructible_v<key_type, Args && ...> &&
              std::is_same_v<mapped_type, HashSetEmptyType>)
   {
-    key_type key = key_type(std::forward<Args...>(args)...);
-    _validateKey(key);
-    reserve(size_ + 1);
-    for (size_type index = _hash(key);; index = _next(index))
-    {
-      if (key_equal()(buckets_[index].first, empty_key_))
-      {
-        buckets_[index].second = mapped_type();
-        buckets_[index].first  = key_type(std::forward<Args...>(args)...);
-        ++size_;
-        return std::make_pair(iterator(this, index), true);
-      }
-      else if (key_equal()(buckets_[index].first, key))
-      {
-        return std::make_pair(iterator(this, index), false);
-      }
-    }
+    key_type key = key_type(std::forward<Args>(args)...);
+    return _emplace(key);
   }
 
   void _erase(size_type erase_index)
