@@ -8,9 +8,10 @@
 #ifndef DRO_OA_HASHMAP
 #define DRO_OA_HASHMAP
 
-#include <algorithm>  // for max
-#include <concepts>   // for requires
-#include <cstddef>    // for size_t, ptrdiff_t
+#include <algorithm>// for max
+#include <concepts> // for requires
+#include <cstddef>  // for size_t, ptrdiff_t
+#include <cstdint>
 #include <functional> // for equal_to, hash
 #include <iterator>   // for pair, forward_iterator_tag
 #include <stdexcept>  // for out_of_range, invalid_argument
@@ -19,11 +20,9 @@
 #include <utility>    // for pair, forward, make_pair
 #include <vector>     // for allocator, vector
 
-namespace dro
-{
+namespace dro {
 
-namespace details
-{
+namespace details {
 
 template <typename T>
 concept OAHashmap_Type =
@@ -36,12 +35,53 @@ concept OAHashmap_NoThrow =
     ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
      (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>));
 
-struct HashSetEmptyType
-{
-};
+// From Martin Ankerl
+namespace wyhash {
 
-template <OAHashmap_Type Key> struct PairHashSet
-{
+inline void mum(uint64_t* a, uint64_t* b) {
+#if defined(__SIZEOF_INT128__)
+  __uint128_t r = *a;
+  r *= *b;
+  *a = static_cast<uint64_t>(r);
+  *b = static_cast<uint64_t>(r >> 64U);
+#elif defined(_MSC_VER) && defined(_M_X64)
+  *a = _umul128(*a, *b, b);
+#else
+  uint64_t ha = *a >> 32U;
+  uint64_t hb = *b >> 32U;
+  uint64_t la = static_cast<uint32_t>(*a);
+  uint64_t lb = static_cast<uint32_t>(*b);
+  uint64_t hi {};
+  uint64_t lo {};
+  uint64_t rh  = ha * hb;
+  uint64_t rm0 = ha * lb;
+  uint64_t rm1 = hb * la;
+  uint64_t rl  = la * lb;
+  uint64_t t   = rl + (rm0 << 32U);
+  auto c       = static_cast<uint64_t>(t < rl);
+  lo           = t + (rm1 << 32U);
+  c += static_cast<uint64_t>(lo < t);
+  hi = rh + (rm0 >> 32U) + (rm1 >> 32U) + c;
+  *a = lo;
+  *b = hi;
+#endif
+}
+
+// multiply and xor mix function, aka MUM
+[[nodiscard]] inline auto mix(uint64_t a, uint64_t b) -> uint64_t {
+  mum(&a, &b);
+  return a ^ b;
+}
+
+[[nodiscard]] inline auto hash(uint64_t x) -> uint64_t {
+  return mix(x, UINT64_C(0x9E3779B97F4A7C15));
+}
+
+}// namespace wyhash
+
+struct HashSetEmptyType {};
+
+template <OAHashmap_Type Key> struct PairHashSet {
   Key first;
   HashSetEmptyType second [[no_unique_address]];
   PairHashSet() = default;
@@ -50,8 +90,17 @@ template <OAHashmap_Type Key> struct PairHashSet
   bool operator!=(const PairHashSet& other) { return ! (*this == other); }
 };
 
-template <typename Container> struct HashIterator
-{
+template <typename Pair> struct HashNode {
+  Pair pair_;
+  // Least significant bit: 1 - Full, 0 - Empty
+  uint64_t fingerprint_full_ {};
+  // Next == 0: No valid next pointer
+  uint64_t next_ {};
+  HashNode() = default;
+  explicit HashNode(Pair pair) : pair_(pair) {}
+};
+
+template <typename Container> struct HashIterator {
   using key_type          = typename Container::key_type;
   using mapped_type       = typename Container::mapped_type;
   using value_type        = typename Container::value_type;
@@ -65,25 +114,20 @@ template <typename Container> struct HashIterator
   using iterator_category = std::forward_iterator_tag;
 
   explicit HashIterator(Container* hashmap, size_type index)
-      : hashmap_(hashmap), index_(index)
-  {
+      : hashmap_(hashmap), index_(index) {
     _nextValidIndex();
   }
 
-  bool operator==(const HashIterator& other) const
-  {
+  bool operator==(const HashIterator& other) const {
     return other.hashmap_ == hashmap_ && other.index_ == index_;
   }
 
-  bool operator!=(const HashIterator& other) const
-  {
+  bool operator!=(const HashIterator& other) const {
     return ! (*this == other);
   }
 
-  HashIterator& operator++()
-  {
-    if (index_ < hashmap_->buckets_.size())
-    {
+  HashIterator& operator++() {
+    if (index_ < hashmap_->buckets_.size()) {
       ++index_;
       _nextValidIndex();
     }
@@ -146,12 +190,10 @@ template <typename Container> struct HashIterator
     return &hashmap_->buckets_[index_];
   }
 
-  void _nextValidIndex()
-  {
+  void _nextValidIndex() {
     auto& buckets = hashmap_->buckets_;
     while (index_ < buckets.size() &&
-           key_equal()(buckets[index_].first, hashmap_->empty_key_))
-    {
+           hashmap_->_getFull(buckets[index_].fingerprint_full_)) {
       ++index_;
     }
   }
@@ -163,11 +205,10 @@ private:
 };
 
 template <OAHashmap_Type Key, OAHashmap_Type Value, typename Pair,
-          typename Hash      = std::hash<Key>,
+          typename Hash = std::hash<Key>, bool HashMix = true,
           typename KeyEqual  = std::equal_to<Key>,
-          typename Allocator = std::allocator<Pair>>
-class OAHashmap
-{
+          typename Allocator = std::allocator<HashNode<Pair>>>
+class OAHashmap {
 public:
   using key_type        = Key;
   using mapped_type     = Value;
@@ -177,24 +218,33 @@ public:
   using key_equal       = KeyEqual;
   using allocator_type  = Allocator;
   using difference_type = std::ptrdiff_t;
-  using buckets         = std::vector<value_type, Allocator>;
+  using node            = HashNode<Pair>;
+  using buckets         = std::vector<node, Allocator>;
   using iterator        = HashIterator<OAHashmap>;
   using const_iterator  = HashIterator<const OAHashmap>;
 
 private:
-  key_type empty_key_;
   buckets buckets_;
-  size_type size_ {0};
-  float load_factor_ = 0.4;
+  size_type size_ {};
+  float load_factor_    = 0.95F;
+  float hashable_ratio_ = 0.8F;
+  size_type collision_head_ {};
+  size_type collision_tail_ {};
+  size_type hashable_capacity_ {};
+  Hash hash_ {};
   friend iterator;
   friend const_iterator;
 
 public:
-  OAHashmap(key_type empty_key, size_type count,
-            const Allocator& allocator = Allocator())
-      : empty_key_(empty_key), buckets_(allocator)
-  {
-    buckets_.resize(count, value_type(empty_key_, mapped_type()));
+  explicit OAHashmap(size_type count, const Allocator& allocator = Allocator())
+      : buckets_(allocator) {
+    if (count < 1) {
+      throw std::invalid_argument("Count must be positive number.");
+    }
+    buckets_.resize(count);
+    hashable_capacity_ = static_cast<float>(count) * hashable_ratio_;
+    collision_head_    = hashable_capacity_;
+    collision_tail_    = hashable_capacity_;
   }
 
   // No memory allocated, this is redundant
@@ -205,8 +255,7 @@ public:
   OAHashmap& operator=(OAHashmap&&)      = default;
 
   // Member Functions
-  allocator_type get_allocator() const noexcept
-  {
+  allocator_type get_allocator() const noexcept {
     return buckets_.get_allocator();
   }
 
@@ -219,13 +268,11 @@ public:
 
   iterator end() noexcept { return iterator(this, buckets_.size()); }
 
-  const_iterator end() const noexcept
-  {
+  const_iterator end() const noexcept {
     return const_iterator(this, buckets_.size());
   }
 
-  const_iterator cend() const noexcept
-  {
+  const_iterator cend() const noexcept {
     return const_iterator(this, buckets_.size());
   }
 
@@ -234,25 +281,26 @@ public:
 
   [[nodiscard]] size_type size() const noexcept { return size_; }
 
-  [[nodiscard]] size_type max_size() const noexcept
-  {
+  [[nodiscard]] size_type max_size() const noexcept {
     return buckets_.max_size() / 2;
   }
 
   // Modifiers
-  void clear() noexcept
-  {
-    for (auto& b : buckets_) { b.first = empty_key_; }
-    size_ = 0;
+  void clear() noexcept {
+    for (auto& b : buckets_) {
+      _setEmpty(b.fingerprint_full_);
+      b.next_ = 0;
+    }
+    size_           = 0;
+    collision_head_ = hashable_capacity_;
+    collision_tail_ = hashable_capacity_;
   }
 
-  std::pair<iterator, bool> insert(const value_type& pair)
-  {
+  std::pair<iterator, bool> insert(const value_type& pair) {
     return _emplace(pair.first, pair.second);
   }
 
-  std::pair<iterator, bool> insert(value_type&& pair)
-  {
+  std::pair<iterator, bool> insert(value_type&& pair) {
     return _emplace(pair.first, std::move(pair.second));
   }
 
@@ -270,8 +318,7 @@ public:
 
   template <typename P>
     requires std::is_convertible_v<P, value_type>
-  std::pair<iterator, bool> insert(P&& value)
-  {
+  std::pair<iterator, bool> insert(P&& value) {
     return _emplace(value.first, std::move(value.second));
   }
 
@@ -289,29 +336,24 @@ public:
     return _emplaceSet(std::forward<Args>(args)...);
   }
 
-  iterator erase(iterator it)
-  {
+  iterator erase(iterator it) {
     _erase(it.index_);
     return iterator(this, it.index_);
   }
 
-  iterator erase(const_iterator it)
-  {
+  iterator erase(const_iterator it) {
     _erase(it.index_);
     return iterator(this, it.index_);
   }
 
-  iterator erase(const_iterator itStart, const_iterator itEnd)
-  {
+  iterator erase(const_iterator itStart, const_iterator itEnd) {
     for (; itStart != itEnd; ++itStart) { _erase(itStart.index_); }
     return iterator(this, itStart.index_);
   }
 
-  size_type erase(const key_type& key)
-  {
+  size_type erase(const key_type& key) {
     size_type index = _find(key);
-    if (index != buckets_.size())
-    {
+    if (index != buckets_.size()) {
       _erase(index);
       return 1U;
     }
@@ -320,27 +362,23 @@ public:
 
   template <typename K>
     requires std::is_convertible_v<K, key_type>
-  size_type erase(K&& x)
-  {
+  size_type erase(K&& x) {
     size_type index = _find(x);
-    if (index != buckets_.size())
-    {
+    if (index != buckets_.size()) {
       _erase(index);
       return 1U;
     }
     return 0U;
   }
 
-  void swap(OAHashmap& other) noexcept
-  {
+  void swap(OAHashmap& other) noexcept {
     std::swap(buckets_, other.buckets_);
     std::swap(size_, other.size_);
-    std::swap(empty_key_, other.empty_key_);
     std::swap(load_factor_, other.load_factor_);
+    // TBD
   }
 
-  void merge(const OAHashmap& other)
-  {
+  void merge(const OAHashmap& other) {
     for (auto& elem : other) { _emplace(elem); }
   }
 
@@ -349,8 +387,7 @@ public:
     requires(! std::is_same_v<mapped_type, HashSetEmptyType>)
   {
     size_type index = _find(key);
-    if (index != buckets_.size())
-    {
+    if (index != buckets_.size()) {
       return buckets_[index].second;
     }
     throw std::out_of_range("OAHashmap::at");
@@ -360,8 +397,7 @@ public:
     requires(! std::is_same_v<mapped_type, HashSetEmptyType>)
   {
     size_type index = _find(key);
-    if (index != buckets_.size())
-    {
+    if (index != buckets_.size()) {
       return buckets_[index].second;
     }
     throw std::out_of_range("OAHashmap::at");
@@ -373,8 +409,7 @@ public:
              std::is_convertible_v<K, key_type>)
   {
     size_type index = _find(x);
-    if (index != buckets_.size())
-    {
+    if (index != buckets_.size()) {
       return buckets_[index].second;
     }
     throw std::out_of_range("OAHashmap::at");
@@ -386,8 +421,7 @@ public:
              std::is_convertible_v<K, key_type>)
   {
     size_type index = _find(x);
-    if (index != buckets_.size())
-    {
+    if (index != buckets_.size()) {
       return buckets_[index].second;
     }
     throw std::out_of_range("OAHashmap::at");
@@ -397,8 +431,7 @@ public:
     requires(! std::is_same_v<mapped_type, HashSetEmptyType>)
   {
     size_type index = _find(key);
-    if (index != buckets_.size())
-    {
+    if (index != buckets_.size()) {
       return buckets_[index].second;
     }
     index = _emplace(key).first.index_;
@@ -409,8 +442,7 @@ public:
     requires(! std::is_same_v<mapped_type, HashSetEmptyType>)
   {
     size_type index = _find(key);
-    if (index != buckets_.size())
-    {
+    if (index != buckets_.size()) {
       return buckets_[index].second;
     }
     index = _emplace(key).first.index_;
@@ -423,16 +455,14 @@ public:
              std::is_convertible_v<K, key_type>)
   {
     size_type index = _find(x);
-    if (index != buckets_.size())
-    {
+    if (index != buckets_.size()) {
       return buckets_[index].second;
     }
     index = _emplace(x).first.index_;
     return buckets_[index].second;
   }
 
-  size_type count(const key_type& key) const
-  {
+  size_type count(const key_type& key) const {
     return (_find(key) != buckets_.size());
   }
 
@@ -452,8 +482,7 @@ public:
     return iterator(this, _find(key));
   }
 
-  const_iterator find(const key_type& key) const
-  {
+  const_iterator find(const key_type& key) const {
     return const_iterator(this, _find(key));
   }
 
@@ -473,16 +502,14 @@ public:
     return count(x);
   }
 
-  std::pair<iterator, iterator> equal_range(const key_type& key)
-  {
+  std::pair<iterator, iterator> equal_range(const key_type& key) {
     auto first  = find(key);
     auto second = first;
     return {first, ++second};
   }
 
-  std::pair<const_iterator, const_iterator> equal_range(
-      const key_type& key) const
-  {
+  std::pair<const_iterator, const_iterator>
+  equal_range(const key_type& key) const {
     auto first  = find(key);
     auto second = first;
     return {first, ++second};
@@ -490,8 +517,7 @@ public:
 
   template <typename K>
     requires std::is_convertible_v<K, key_type>
-  std::pair<iterator, iterator> equal_range(const K& x)
-  {
+  std::pair<iterator, iterator> equal_range(const K& x) {
     auto first  = find(x);
     auto second = first;
     return {first, ++second};
@@ -499,8 +525,7 @@ public:
 
   template <typename K>
     requires std::is_convertible_v<K, key_type>
-  std::pair<const_iterator, const_iterator> equal_range(const K& x) const
-  {
+  std::pair<const_iterator, const_iterator> equal_range(const K& x) const {
     auto first  = find(x);
     auto second = first;
     return {first, ++second};
@@ -509,47 +534,41 @@ public:
   // Bucket Interface
   [[nodiscard]] size_type bucket_count() const { return buckets_.size(); }
 
-  [[nodiscard]] size_type max_bucket_count() const
-  {
+  [[nodiscard]] size_type max_bucket_count() const {
     return buckets_.max_size();
   }
 
   // Hash Policy
-  [[nodiscard]] float load_factor() const
-  {
+  [[nodiscard]] float load_factor() const {
     return static_cast<float>(size()) / static_cast<float>(max_bucket_count());
   }
 
-  void max_load_factor(float load_factor)
-  {
+  void max_load_factor(float load_factor) {
     load_factor_ = load_factor;
     reserve(size_);
   }
 
   [[nodiscard]] float max_load_factor() const { return load_factor_; }
 
-  void rehash(size_type count)
-  {
+  void rehash(size_type count) {
     double mult       = 1.0 / load_factor_;
     size_type newSize = static_cast<double>(size_) * mult;
     count             = std::max(count, newSize);
-    OAHashmap other(empty_key_, count, get_allocator());
+    OAHashmap other(count, get_allocator());
     for (auto it = begin(); it != end(); ++it) { other.insert(*it); }
     swap(other);
   }
 
-  void reserve(std::size_t count)
-  {
+  void reserve(std::size_t count) {
     double mult        = 1.0 / load_factor_;
     size_type newCount = static_cast<double>(count) * mult;
-    if (newCount > buckets_.size())
-    {
+    if (newCount > buckets_.size()) {
       rehash(newCount);
     }
   }
 
   // Observers
-  [[nodiscard]] hasher hash_function() const { return hasher(); }
+  [[nodiscard]] hasher hash_function() const { return hash_; }
 
   [[nodiscard]] key_equal key_eq() const { return key_equal(); }
 
@@ -559,22 +578,20 @@ private:
     requires(std::is_convertible_v<K, key_type> &&
              std::is_constructible_v<mapped_type, Args && ...>)
   {
-    _validateKey(key);
     reserve(size_ + 1);
-    for (size_type index = _hash(key);; index = _next(index))
-    {
-      if (key_equal()(buckets_[index].first, empty_key_))
-      {
-        buckets_[index].second = mapped_type(std::forward<Args>(args)...);
-        buckets_[index].first  = key;
-        ++size_;
-        return std::make_pair(iterator(this, index), true);
-      }
-      else if (key_equal()(buckets_[index].first, key))
-      {
-        return std::make_pair(iterator(this, index), false);
-      }
-    }
+    uint64_t keyHash       = _hash(key);
+    uint64_t fingerprint   = _getFingerprint(keyHash);
+    size_type insert_index = _index_from_hash(keyHash);
+    // for (size_type index = _hash(key);; index = _next(index)) {
+    //   if (key_equal()(buckets_[index].first, empty_key_)) {
+    //     buckets_[index].second = mapped_type(std::forward<Args>(args)...);
+    //     buckets_[index].first  = key;
+    //     ++size_;
+    //     return std::make_pair(iterator(this, index), true);
+    //   } else if (key_equal()(buckets_[index].first, key)) {
+    //     return std::make_pair(iterator(this, index), false);
+    //   }
+    // }
   }
 
   template <typename... Args>
@@ -586,112 +603,125 @@ private:
     return _emplace(key);
   }
 
-  void _erase(size_type erase_index)
-  {
-    for (size_type index = _next(erase_index);; index = _next(index))
-    {
-      if (key_equal()(buckets_[index].first, empty_key_))
-      {
-        buckets_[erase_index].first = empty_key_;
-        --size_;
+  void _erase(size_type erase_index) {
+    if (erase_index < hashable_capacity_) {
+      auto& bucket   = buckets_[erase_index];
+      size_type next = bucket.next_;
+      if (next == 0) {
+        _setEmpty(bucket.fingerprint_full_);
         return;
       }
-      size_type idealIndexBucket = _hash(buckets_[index].first);
-      if (_differenceFromIdeal(erase_index, idealIndexBucket) <
-          _differenceFromIdeal(index, idealIndexBucket))
-      {
-        buckets_[erase_index] = buckets_[index];
-        erase_index           = index;
-      }
+      std::swap(bucket, buckets_[next]);
+      erase_index = next;
     }
+    auto& bucket = buckets_[erase_index];
+    _setEmpty(bucket.fingerprint_full_);
+    --size_;
+    // Add to collision linked list
+    buckets_[collision_tail_].next_ = erase_index;
+    collision_tail_                 = erase_index;
   }
 
   template <typename K>
   size_type _find(const K& key) const
     requires std::is_convertible_v<K, key_type>
   {
-    _validateKey(key);
-    for (size_type index = _hash(key);; index = _next(index))
-    {
-      if (key_equal()(buckets_[index].first, key))
-      {
+    uint64_t keyHash     = _hash(key);
+    uint64_t fingerprint = _getFingerprint(keyHash);
+
+    for (size_type index = _index_from_hash(keyHash);;) {
+      auto& bucket                = buckets_[index];
+      auto& bucketFingerprintFull = bucket.fingerprint_full_;
+      if (_getFull(bucketFingerprintFull) &&
+          fingerprint == _getFingerprint(bucketFingerprintFull) &&
+          key_equal()(bucket.pair_.first, key)) {
         return index;
       }
-      if (key_equal()(buckets_[index].first, empty_key_))
-      {
-        return buckets_.size();
+      // Set index,
+      index = bucket.next_;
+      if (index == 0) {
+        break;
       }
     }
+    return buckets_.size();
+  }
+
+  [[nodiscard]] size_type _index_from_hash(uint64_t& hash) const {
+    return hash % buckets_.size();
   }
 
   template <typename K>
   [[nodiscard]] size_type _hash(const K& key) const
       noexcept(noexcept(Hash()(key)))
-    requires std::is_convertible_v<K, key_type>
+    requires std::is_convertible_v<K, key_type> && (! HashMix)
   {
-    return hasher()(key) % buckets_.size();
-  }
-
-  [[nodiscard]] size_type _next(size_type index) const noexcept
-  {
-    return (index + 1) % buckets_.size();
-  }
-
-  [[nodiscard]] size_type _differenceFromIdeal(size_type indexA,
-                                               size_type indexB) const noexcept
-  {
-    return (buckets_.size() + (indexA - indexB)) % buckets_.size();
+    return hash_(key);
   }
 
   template <typename K>
-  void _validateKey(const K& key) const
-    requires std::is_convertible_v<K, key_type>
+  [[nodiscard]] constexpr auto _hash(K const& key) const
+      noexcept(noexcept(Hash()(key)))
+    requires std::is_convertible_v<K, key_type> && HashMix
   {
-    if (key_equal()(key, empty_key_))
-    {
-      throw std::invalid_argument("Key cannot equal empty_key type");
-    }
+    return wyhash::hash(hash_(key));
+  }
+
+  void _setFingerprint(uint64_t& fingerprint_full, uint64_t& hash) noexcept {
+    fingerprint_full = hash;
+    _setFull(fingerprint_full);
+  }
+
+  [[nodiscard]] uint64_t
+  _getFingerprint(uint64_t& fingerprint_full) const noexcept {
+    return fingerprint_full >> 1;
+  }
+
+  void _setEmpty(uint64_t& fingerprint_full) noexcept {
+    uint64_t mask = ~1;
+    fingerprint_full &= mask;
+  }
+
+  void _setFull(uint64_t& fingerprint_full) noexcept { fingerprint_full |= 1; }
+
+  bool _getFull(uint64_t& fingerprint_full) const noexcept {
+    return fingerprint_full & 1;
   }
 };
 }// namespace details
 
 template <details::OAHashmap_Type Key, details::OAHashmap_Type Value,
-          typename Hash      = std::hash<Key>,
-          typename KeyEqual  = std::equal_to<Key>,
-          typename Allocator = std::allocator<std::pair<Key, Value>>>
+          typename Hash = std::hash<Key>, bool HashMix = true,
+          typename KeyEqual = std::equal_to<Key>,
+          typename Allocator =
+              std::allocator<details::HashNode<std::pair<Key, Value>>>>
 class HashMap : public details::OAHashmap<Key, Value, std::pair<Key, Value>,
-                                          Hash, KeyEqual, Allocator>
-{
+                                          Hash, HashMix, KeyEqual, Allocator> {
   using size_type = std::size_t;
   using base_type = details::OAHashmap<Key, Value, std::pair<Key, Value>, Hash,
-                                       KeyEqual, Allocator>;
+                                       HashMix, KeyEqual, Allocator>;
 
 public:
-  explicit HashMap(Key empty_key, size_type count = 1,
+  explicit HashMap(size_type count            = 1,
                    const Allocator& allocator = Allocator())
-      : base_type(empty_key, count, allocator)
-  {
-  }
+      : base_type(count, allocator) {}
 };
 
 template <details::OAHashmap_Type Key, typename Hash = std::hash<Key>,
-          typename KeyEqual  = std::equal_to<Key>,
-          typename Allocator = std::allocator<details::PairHashSet<Key>>>
+          bool HashMix = true, typename KeyEqual = std::equal_to<Key>,
+          typename Allocator =
+              std::allocator<details::HashNode<details::PairHashSet<Key>>>>
 class HashSet : public details::OAHashmap<Key, details::HashSetEmptyType,
                                           details::PairHashSet<Key>, Hash,
-                                          KeyEqual, Allocator>
-{
+                                          HashMix, KeyEqual, Allocator> {
   using size_type = std::size_t;
-  using base_type =
-      details::OAHashmap<Key, details::HashSetEmptyType,
-                         details::PairHashSet<Key>, Hash, KeyEqual, Allocator>;
+  using base_type = details::OAHashmap<Key, details::HashSetEmptyType,
+                                       details::PairHashSet<Key>, Hash, HashMix,
+                                       KeyEqual, Allocator>;
 
 public:
-  explicit HashSet(Key empty_key, size_type count = 1,
+  explicit HashSet(size_type count            = 1,
                    const Allocator& allocator = Allocator())
-      : base_type(empty_key, count, allocator)
-  {
-  }
+      : base_type(count, allocator) {}
 };
 
 }// namespace dro
