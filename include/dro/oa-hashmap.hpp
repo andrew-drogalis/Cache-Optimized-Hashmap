@@ -13,10 +13,10 @@
 #ifndef DRO_OA_HASHMAP
 #define DRO_OA_HASHMAP
 
-#include <concepts>   // for requires
-#include <cstddef>    // for size_t, ptrdiff_t
-#include <cstdint>    // for uint64_t
-#include <functional> // for equal_to, hash
+#include <concepts>  // for requires
+#include <cstddef>   // for size_t, ptrdiff_t
+#include <cstdint>   // for uint64_t
+#include <functional>// for equal_to, hash
 #include <iterator>   // for pair, forward_iterator_tag
 #include <stdexcept>  // for out_of_range, invalid_argument
 #include <string_view>// for hash
@@ -61,12 +61,12 @@ inline void mum(uint64_t* a, uint64_t* b) {
 #endif
 }
 
-[[nodiscard]] inline auto mix(uint64_t a, uint64_t b) -> uint64_t {
+[[nodiscard]] inline auto mix(uint64_t& a, uint64_t&& b) -> uint64_t {
   mum(&a, &b);
   return a ^ b;
 }
 
-[[nodiscard]] inline auto hash(uint64_t x) -> uint64_t {
+[[nodiscard]] inline auto hash(uint64_t&& x) -> uint64_t {
   return mix(x, UINT64_C(0x9E3779B97F4A7C15));
 }
 }// namespace hashmix
@@ -88,7 +88,6 @@ template <Hashmap_Type Key> struct PairHashSet {
   Key first;
   IsAHashSet second [[no_unique_address]];
   PairHashSet() = default;
-  explicit PairHashSet(Key key, IsAHashSet) : first(key) {}
 };
 
 template <typename Pair> struct HashNode {
@@ -97,7 +96,6 @@ template <typename Pair> struct HashNode {
   uint64_t fingerprint_full_ {};
   uint64_t next_ {};// Index of next element in collision chain
   HashNode() = default;
-  explicit HashNode(Pair pair) : pair_(pair) {}
 };
 
 template <typename Container> struct HashIterator {
@@ -133,7 +131,7 @@ template <typename Container> struct HashIterator {
   }
 
   HashIterator& operator++() {
-    if (index_ < hashmap_->buckets_.size()) {
+    if (index_ < hashmap_->capacity_) {
       ++index_;
       _nextValidIndex();
     }
@@ -198,7 +196,7 @@ template <typename Container> struct HashIterator {
 
   void _nextValidIndex() {
     const auto& buckets = hashmap_->buckets_;
-    while (index_ < buckets.size() &&
+    while (index_ < hashmap_->capacity_ &&
            ! hashmap_->_getFull(buckets[index_].fingerprint_full_)) {
       ++index_;
     }
@@ -230,13 +228,14 @@ public:
   using const_iterator  = HashIterator<const OAHashmap>;
 
 private:
-  float load_factor_                     = 0.95F;
-  static constexpr float hashable_ratio_ = 0.8F;
+  float load_factor_                     = 1.0F;
+  static constexpr float hashable_ratio_ = 0.7F;
   buckets buckets_;
   size_type size_ {};
   size_type collision_head_ {};
   size_type collision_tail_ {};
   Hash hash_ {};
+  size_type capacity_ {};
   size_type hashable_capacity_ {};
   friend iterator;
   friend const_iterator;
@@ -247,8 +246,9 @@ public:
     if (count < 1) {
       throw std::invalid_argument("Count must be positive number.");
     }
-    buckets_.resize(count);
-    hashable_capacity_ = static_cast<float>(count) * hashable_ratio_;
+    capacity_ = count;
+    buckets_.resize(capacity_);
+    hashable_capacity_ = static_cast<float>(capacity_) * hashable_ratio_;
     collision_head_    = hashable_capacity_;
     collision_tail_    = hashable_capacity_;
   }
@@ -261,7 +261,7 @@ public:
   OAHashmap& operator=(OAHashmap&&)      = default;
 
   // Member Functions
-  allocator_type get_allocator() const noexcept {
+  [[nodiscard]] allocator_type get_allocator() const noexcept {
     return buckets_.get_allocator();
   }
 
@@ -272,14 +272,14 @@ public:
 
   const_iterator cbegin() const noexcept { return const_iterator(this, 0); }
 
-  iterator end() noexcept { return iterator(this, buckets_.size()); }
+  iterator end() noexcept { return iterator(this, capacity_); }
 
   const_iterator end() const noexcept {
-    return const_iterator(this, buckets_.size());
+    return const_iterator(this, capacity_);
   }
 
   const_iterator cend() const noexcept {
-    return const_iterator(this, buckets_.size());
+    return const_iterator(this, capacity_);
   }
 
   // Capacity
@@ -288,7 +288,7 @@ public:
   [[nodiscard]] size_type size() const noexcept { return size_; }
 
   [[nodiscard]] size_type max_size() const noexcept {
-    return buckets_.max_size() / 2;
+    return buckets_.max_size();
   }
 
   // Modifiers
@@ -334,38 +334,34 @@ public:
   }
 
   iterator erase(iterator it) {
-    _erase(it.index_);
+    if (_getFull(buckets_[it.index_].fingerprint_full_)) {
+      _erase(buckets_[it.index_].pair_.first);
+    }
     return iterator(this, it.index_);
   }
 
   iterator erase(const_iterator it) {
-    _erase(it.index_);
+    if (_getFull(buckets_[it.index_].fingerprint_full_)) {
+      _erase(buckets_[it.index_].pair_.first);
+    }
     return iterator(this, it.index_);
   }
 
   iterator erase(const_iterator itStart, const_iterator itEnd) {
-    for (; itStart != itEnd; ++itStart) { _erase(itStart.index_); }
+    for (; itStart != itEnd && itStart != end(); ++itStart) {
+      if (_isFull(buckets_[itStart.index_].fingerprint_full_)) {
+        _erase(buckets_[itStart.index_].pair_.first);
+      }
+    }
     return iterator(this, itStart.index_);
   }
 
-  size_type erase(const key_type& key) {
-    size_type index = _find(key);
-    if (index != buckets_.size()) {
-      _erase(index);
-      return 1U;
-    }
-    return 0U;
-  }
+  size_type erase(const key_type& key) { return _erase(key); }
 
   template <typename K>
     requires std::is_convertible_v<K, key_type>
   size_type erase(K&& x) {
-    size_type index = _find(x);
-    if (index != buckets_.size()) {
-      _erase(index);
-      return 1U;
-    }
-    return 0U;
+    return _erase(x);
   }
 
   void swap(OAHashmap& other) noexcept {
@@ -374,6 +370,8 @@ public:
     std::swap(load_factor_, other.load_factor_);
     std::swap(collision_head_, other.collision_head_);
     std::swap(collision_tail_, other.collision_tail_);
+    std::swap(capacity_, other.capacity_);
+    std::swap(hashable_capacity_, other.hashable_capacity_);
   }
 
   void merge(const OAHashmap& other) {
@@ -384,8 +382,8 @@ public:
   mapped_type& at(const key_type& key)
     requires(! std::is_same_v<mapped_type, IsAHashSet>)
   {
-    size_type index = _find(key);
-    if (index != buckets_.size()) {
+    size_type index = _find(key).first;
+    if (index != capacity_) {
       return buckets_[index].pair_.second;
     }
     throw std::out_of_range("OAHashmap::at");
@@ -394,8 +392,8 @@ public:
   const mapped_type& at(const key_type& key) const
     requires(! std::is_same_v<mapped_type, IsAHashSet>)
   {
-    size_type index = _find(key);
-    if (index != buckets_.size()) {
+    size_type index = _find(key).first;
+    if (index != capacity_) {
       return buckets_[index].pair_.second;
     }
     throw std::out_of_range("OAHashmap::at");
@@ -406,8 +404,8 @@ public:
     requires(! std::is_same_v<mapped_type, IsAHashSet> &&
              std::is_convertible_v<K, key_type>)
   {
-    size_type index = _find(x);
-    if (index != buckets_.size()) {
+    size_type index = _find(x).first;
+    if (index != capacity_) {
       return buckets_[index].pair_.second;
     }
     throw std::out_of_range("OAHashmap::at");
@@ -418,8 +416,8 @@ public:
     requires(! std::is_same_v<mapped_type, IsAHashSet> &&
              std::is_convertible_v<K, key_type>)
   {
-    size_type index = _find(x);
-    if (index != buckets_.size()) {
+    size_type index = _find(x).first;
+    if (index != capacity_) {
       return buckets_[index].pair_.second;
     }
     throw std::out_of_range("OAHashmap::at");
@@ -449,34 +447,36 @@ public:
   }
 
   size_type count(const key_type& key) const {
-    return (_find(key) != buckets_.size());
+    return (_find(key).first != capacity_);
   }
 
   template <typename K>
   size_type count(const K& x) const
     requires std::is_convertible_v<K, key_type>
   {
-    return (_find(x) != buckets_.size());
+    return (_find(x).first != capacity_);
   }
 
-  iterator find(const key_type& key) { return iterator(this, _find(key)); }
+  iterator find(const key_type& key) {
+    return iterator(this, _find(key).first);
+  }
 
   template <typename K>
   iterator find(const K& key)
     requires std::is_convertible_v<K, key_type>
   {
-    return iterator(this, _find(key));
+    return iterator(this, _find(key).first);
   }
 
   const_iterator find(const key_type& key) const {
-    return const_iterator(this, _find(key));
+    return const_iterator(this, _find(key).first);
   }
 
   template <typename K>
   const_iterator find(const K& key) const
     requires std::is_convertible_v<K, key_type>
   {
-    return const_iterator(this, _find(key));
+    return const_iterator(this, _find(key).first);
   }
 
   bool contains(const key_type& key) { return count(key); }
@@ -490,35 +490,35 @@ public:
 
   std::pair<iterator, iterator> equal_range(const key_type& key) {
     auto first  = find(key);
-    auto second = first;
-    return {first, ++second};
+    auto second = first + 1;
+    return {first, second};
   }
 
   std::pair<const_iterator, const_iterator>
   equal_range(const key_type& key) const {
     auto first  = find(key);
-    auto second = first;
-    return {first, ++second};
+    auto second = first + 1;
+    return {first, second};
   }
 
   template <typename K>
     requires std::is_convertible_v<K, key_type>
   std::pair<iterator, iterator> equal_range(const K& x) {
     auto first  = find(x);
-    auto second = first;
-    return {first, ++second};
+    auto second = first + 1;
+    return {first, second};
   }
 
   template <typename K>
     requires std::is_convertible_v<K, key_type>
   std::pair<const_iterator, const_iterator> equal_range(const K& x) const {
     auto first  = find(x);
-    auto second = first;
-    return {first, ++second};
+    auto second = first + 1;
+    return {first, second};
   }
 
   // Bucket Interface
-  [[nodiscard]] size_type bucket_count() const { return buckets_.size(); }
+  [[nodiscard]] size_type bucket_count() const { return capacity_; }
 
   [[nodiscard]] size_type max_bucket_count() const {
     return buckets_.max_size();
@@ -543,7 +543,7 @@ public:
   }
 
   void reserve(size_type count) {
-    size_type max_capacity = static_cast<float>(bucket_count()) * load_factor_;
+    size_type max_capacity = static_cast<float>(capacity_) * load_factor_;
     if (count > max_capacity) {
       rehash(count);
     }
@@ -557,80 +557,79 @@ public:
 private:
   template <typename... Args>
   std::pair<iterator, bool> _emplace(Args&&... args) {
-    // Resize and Rehash
-    reserve(size_ + 1);
-    validateSize();
-
     key_type key {};
-    _getKey(key, std::forward<Args>(args)...);
-    uint64_t keyHash            = _hash(key);
-    uint64_t fingerprint        = _getFingerprint(keyHash);
-    size_type insert_index      = _index_from_hash(keyHash);
-    auto& bucket                = buckets_[insert_index];
-    auto& bucketFingerprintFull = bucket.fingerprint_full_;
-    // Main table is empty, so insert
-    if (! _getFull(bucketFingerprintFull)) {
-      _buildPair(insert_index, key, std::forward<Args>(args)...);
-      _setFingerprint(bucketFingerprintFull, keyHash);
-      bucket.next_ = 0;
-      ++size_;
-      return std::make_pair(iterator(this, insert_index), true);
-    }
-    // Main table is full, check if match
-    if (fingerprint == _getFingerprint(bucketFingerprintFull) &&
-        key_equal()(bucket.pair_.first, key)) {
-      return std::make_pair(iterator(this, insert_index), false);
-    }
-    // Check the collision chain
-    size_type currNode {insert_index};
-    size_type nextNode = bucket.next_;
-    while (nextNode) {
-      currNode     = nextNode;
-      auto& bucket = buckets_[currNode];
-      if (fingerprint == _getFingerprint(bucket.fingerprint_full_) &&
-          key_equal()(bucket.pair_.first, key)) {
-        return std::make_pair(iterator(this, insert_index), false);
+    _buildKey(key, std::forward<Args>(args)...);
+    uint64_t keyHash       = _hash(key);
+    uint64_t fingerprint   = _getFingerprint(keyHash);
+    size_type insert_index = _index_from_hash(keyHash);
+
+    if (_getFull(buckets_[insert_index].fingerprint_full_)) {
+      // Check the collision chain
+      size_type chainNode {insert_index};
+      do {
+        auto& bucket = buckets_[chainNode];
+        if (fingerprint == _getFingerprint(bucket.fingerprint_full_) &&
+            key_equal()(bucket.pair_.first, key)) {
+          return std::make_pair(iterator(this, insert_index), false);
+        }
+        chainNode = bucket.next_;
+      } while (chainNode);
+      // Not in the hashmap, will 100% insert.
+      if (! _validateLoadFactorNotExceeded()) {
+        return _emplace(std::forward<Args>(args)...);
       }
-      nextNode = bucket.next_;
-    }
-    // Insert at the end of the collisions vector
-    if (collision_tail_ == collision_head_) {
-      insert_index = collision_head_;
-      ++collision_head_;
-      ++collision_tail_;
-    }
-    // Fill in the empty slots
-    else {
-      insert_index = buckets_[collision_head_].next_;
-      if (insert_index == collision_tail_) {
-        collision_tail_ = collision_head_;
-      } else {
-        buckets_[collision_head_].next_ = buckets_[insert_index].next_;
+      // Insert at the end of the collisions vector
+      if (collision_tail_ == collision_head_) {
+        if (! _validateCollisionHasSpace()) {
+          return _emplace(std::forward<Args>(args)...);
+        }
+        insert_index = collision_head_;
+        ++collision_head_;
+        ++collision_tail_;
       }
+      // Fill in the empty slots
+      else {
+        insert_index = buckets_[collision_head_].next_;
+        if (insert_index == collision_tail_) {
+          collision_tail_ = collision_head_;
+        } else {
+          buckets_[collision_head_].next_ = buckets_[insert_index].next_;
+        }
+      }
+      // Update chain
+      buckets_[chainNode].next_ = insert_index;
+    } else if (! _validateLoadFactorNotExceeded()) {
+      return _emplace(std::forward<Args>(args)...);
     }
-    // Update chain
-    buckets_[currNode].next_ = insert_index;
     // Insert
-    _buildPair(insert_index, key, std::forward<Args>(args)...);
+    _emplaceKey(insert_index, key);
+    _emplaceValue(insert_index, std::forward<Args>(args)...);
     _setFingerprint(buckets_[insert_index].fingerprint_full_, keyHash);
     buckets_[insert_index].next_ = 0;
     ++size_;
     return std::make_pair(iterator(this, insert_index), true);
   }
 
-  template <std::size_t N, class... Ts> decltype(auto) _getNth(Ts&&... ts) {
-    return std::get<N>(std::forward_as_tuple(ts...));
-  }
-
-  template <typename... Args>
-  void _getKey(key_type& key, Args&&... args)
-    requires(! std::is_same_v<mapped_type, IsAHashSet>)
+  template <typename First, typename... Args>
+  void _buildKey(key_type& key, First&& first, Args&&... args)
+    requires(! std::is_same_v<mapped_type, IsAHashSet> &&
+             std::is_move_assignable_v<key_type>)
   {
-    key = _getNth<0>(args...);
+    key = first;
+  }
+
+  template <typename First, typename... Args>
+  void _buildKey(key_type& key, First&& first, Args&&... args)
+    requires(! std::is_same_v<mapped_type, IsAHashSet> &&
+             ! std::is_move_assignable_v<key_type> &&
+             std::is_copy_assignable_v<key_type>)
+  {
+    key_type non_movable(first);
+    key = non_movable;
   }
 
   template <typename... Args>
-  void _getKey(key_type& key, Args&&... args)
+  void _buildKey(key_type& key, Args&&... args)
     requires(std::is_same_v<mapped_type, IsAHashSet> &&
              std::is_constructible_v<key_type, Args && ...> &&
              std::is_move_assignable_v<key_type>)
@@ -639,69 +638,92 @@ private:
   }
 
   template <typename... Args>
-  void _getKey(key_type& key, Args&&... args)
+  void _buildKey(key_type& key, Args&&... args)
     requires(std::is_same_v<mapped_type, IsAHashSet> &&
              std::is_constructible_v<key_type, Args && ...> &&
              std::is_copy_assignable_v<key_type> &&
              ! std::is_move_assignable_v<key_type>)
   {
-    key_type non_movable = key_type(std::forward<Args>(args)...);
-    key                  = non_movable;
+    key_type non_movable(std::forward<Args>(args)...);
+    key = non_movable;
   }
 
-  template <typename... Args>
-  void _buildKey(const size_type& insert_index, key_type& key, Args&&... args)
-    requires(std::is_same_v<mapped_type, IsAHashSet> &&
-             std::is_move_assignable_v<key_type>)
+  void _emplaceKey(const size_type& insert_index, key_type& key)
+    requires(std::is_move_assignable_v<key_type>)
   {
     buckets_[insert_index].pair_.first = std::move(key);
   }
 
-  template <typename... Args>
-  void _buildKey(const size_type& insert_index, key_type& key, Args&&... args)
-    requires(std::is_same_v<mapped_type, IsAHashSet> &&
-             std::is_copy_assignable_v<key_type> &&
+  void _emplaceKey(const size_type& insert_index, key_type& key)
+    requires(std::is_copy_assignable_v<key_type> &&
              ! std::is_move_assignable_v<key_type>)
   {
     buckets_[insert_index].pair_.first = key;
   }
 
+  template <typename... Args>
+  void _emplaceValue(const size_type& insert_index, Args&&... args)
+    requires(std::is_same_v<mapped_type, IsAHashSet>)
+  {}// Intentionally blank for HashSet
+
   template <typename First, typename... Args>
-  void _buildPair(const size_type& insert_index, key_type& key, First&&,
-                  Args&&... args)
+  void _emplaceValue(const size_type& insert_index, First&&, Args&&... args)
     requires(! std::is_same_v<mapped_type, IsAHashSet> &&
+             std::is_move_assignable_v<mapped_type> &&
              std::is_constructible_v<mapped_type, Args && ...>)
   {
     buckets_[insert_index].pair_.second =
         mapped_type(std::forward<Args>(args)...);
-    buckets_[insert_index].pair_.first = key;
   }
 
-  void _erase(size_type& erase_index) {
+  template <typename First, typename... Args>
+  void _emplaceValue(const size_type& insert_index, First&&, Args&&... args)
+    requires(! std::is_same_v<mapped_type, IsAHashSet> &&
+             std::is_copy_assignable_v<mapped_type> &&
+             ! std::is_move_assignable_v<mapped_type> &&
+             std::is_constructible_v<mapped_type, Args && ...>)
+  {
+    mapped_type non_movable(std::forward<Args>(args)...);
+    buckets_[insert_index].pair_.second = non_movable;
+  }
+
+  size_type _erase(const key_type& key) {
+    auto findLocation     = _find(key);
+    size_type erase_index = findLocation.first;
+    if (erase_index == capacity_) {
+      return 0U;
+    }
+    auto& bucket   = buckets_[erase_index];
+    size_type next = bucket.next_;
     if (erase_index < hashable_capacity_) {
-      auto& bucket   = buckets_[erase_index];
-      size_type next = bucket.next_;
       if (next == 0) {
         _setEmpty(bucket.fingerprint_full_);
-        return;
+        --size_;
+        return 1U;
       }
       std::swap(bucket, buckets_[next]);
       erase_index = next;
+    } else {
+      size_type _prev_index_       = findLocation.second;
+      buckets_[_prev_index_].next_ = next;
     }
-    auto& bucket = buckets_[erase_index];
-    _setEmpty(bucket.fingerprint_full_);
+    _setEmpty(buckets_[erase_index].fingerprint_full_);
+    buckets_[erase_index].next_ = 0;
     --size_;
     // Add to collision linked list
     buckets_[collision_tail_].next_ = erase_index;
     collision_tail_                 = erase_index;
+    return 1U;
   }
 
   template <typename K>
-  size_type _find(const K& key) const
+  std::pair<size_type, size_type> _find(const K& key) const
     requires std::is_convertible_v<K, key_type>
   {
     uint64_t keyHash     = _hash(key);
     uint64_t fingerprint = _getFingerprint(keyHash);
+    // This is to avoid needing a doubly linked list
+    size_type _prev_index_ {capacity_};
 
     for (size_type index = _index_from_hash(keyHash);;) {
       auto& bucket                   = buckets_[index];
@@ -709,23 +731,32 @@ private:
       if (_getFull(bucket_fingerprint) &&
           fingerprint == _getFingerprint(bucket_fingerprint) &&
           key_equal()(bucket.pair_.first, key)) {
-        return index;
+        return {index, _prev_index_};
       }
-      // Set index,
-      index = bucket.next_;
       if (index == 0) {
         break;
       }
+      _prev_index_ = index;
+      index        = bucket.next_;
     }
-    return buckets_.size();
+    return {capacity_, _prev_index_};
   }
 
-  void validateSize() {
-    size_type bucket_capacity = bucket_count();
-    size_type max_capacity = static_cast<float>(bucket_capacity) * load_factor_;
-    if (size_ > max_capacity || collision_head_ == bucket_capacity) {
-      _rehash(bucket_capacity * 2);
+  bool _validateLoadFactorNotExceeded() {
+    size_type max_capacity = static_cast<float>(capacity_) * load_factor_;
+    if (size_ + 1 > max_capacity) {
+      _rehash(capacity_ * 2);
+      return false;
     }
+    return true;
+  }
+
+  bool _validateCollisionHasSpace() {
+    if (collision_head_ == capacity_) {
+      _rehash(capacity_ * 2);
+      return false;
+    }
+    return true;
   }
 
   void _rehash(const size_type& count) {
@@ -735,7 +766,9 @@ private:
   }
 
   [[nodiscard]] size_type _index_from_hash(const uint64_t& hash) const {
-    return hash % buckets_.size();
+    uint64_t mask   = ~0UL >> __builtin_clzl(hashable_capacity_);
+    size_type index = hash & mask;
+    return (index >= hashable_capacity_) ? index - hashable_capacity_ : index;
   }
 
   template <typename K>
@@ -779,7 +812,7 @@ private:
 }// namespace detail
 
 template <detail::Hashmap_Type Key, detail::Hashmap_Type Value,
-          typename Hash = std::hash<Key>, bool HashMix = true,
+          typename Hash = std::hash<Key>, bool HashMix = false,
           typename KeyEqual = std::equal_to<Key>,
           typename Allocator =
               std::allocator<detail::HashNode<std::pair<Key, Value>>>>
@@ -796,7 +829,7 @@ public:
 };
 
 template <detail::Hashmap_Type Key, typename Hash = std::hash<Key>,
-          bool HashMix = true, typename KeyEqual = std::equal_to<Key>,
+          bool HashMix = false, typename KeyEqual = std::equal_to<Key>,
           typename Allocator =
               std::allocator<detail::HashNode<detail::PairHashSet<Key>>>>
 class HashSet : public detail::OAHashmap<Key, detail::IsAHashSet,
