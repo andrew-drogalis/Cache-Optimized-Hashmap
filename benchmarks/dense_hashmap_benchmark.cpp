@@ -1,46 +1,45 @@
-// Andrew Drogalis Copyright (c) 2024, GNU 3.0 Licence
+// Copyright (c) 2024 Andrew Drogalis
 //
-// This library is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the “Software”), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
 #include <chrono>
-#include <dro/oa-hashmap.hpp>
+#include <dro/dense_hashmap.hpp>
 #include <iostream>
 #include <random>
 #include <unistd.h>
 #include <unordered_map>
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char* argv[]) {
   size_t size  = 1'000'000;
   size_t iters = 10'000'000;
 
   {
-    dro::HashMap<int, int> hashmap {0, size};
-    std::cout << "Dro Hashmap: \n";
+    dro::dense_hashmap<int, int> hashmap {size};
+    std::cout << "dro::dense_hashmap: \n";
 
     std::minstd_rand generator(0);
     std::uniform_int_distribution<int> uniform_distribution(2, size);
 
-    for (size_t i {}; i < size; ++i)
-    {
+    for (size_t i {}; i < size; ++i) {
       const int value = uniform_distribution(generator);
       hashmap.insert({value, {}});
     }
 
     auto start = std::chrono::high_resolution_clock::now();
-    for (size_t i {}; i < iters; ++i)
-    {
+    for (size_t i {}; i < iters; ++i) {
       const int value = uniform_distribution(generator);
       const auto it   = hashmap.find(value);
-      if (it == hashmap.end())
-      {
+      if (it == hashmap.end()) {
         hashmap.insert({value, {}});
-      }
-      else
-      {
+      } else {
         hashmap.erase(it);
       }
     }
@@ -62,23 +61,18 @@ int main(int argc, char* argv[])
     std::minstd_rand generator(0);
     std::uniform_int_distribution<int> uniform_distribution(2, size);
 
-    for (size_t i {}; i < size; ++i)
-    {
+    for (size_t i {}; i < size; ++i) {
       const int value = uniform_distribution(generator);
       hashmap.insert({value, {}});
     }
 
     auto start = std::chrono::high_resolution_clock::now();
-    for (size_t i {}; i < iters; ++i)
-    {
+    for (size_t i {}; i < iters; ++i) {
       const int value = uniform_distribution(generator);
       const auto it   = hashmap.find(value);
-      if (it == hashmap.end())
-      {
+      if (it == hashmap.end()) {
         hashmap.insert({value, {}});
-      }
-      else
-      {
+      } else {
         hashmap.erase(it);
       }
     }

@@ -1,4 +1,4 @@
-# Open Addressing Hashmap
+# Dense HashMap
 
 A STL compliant open addressing hashmap and hashset that uses linear probing to find the next available slots in the underlying vector. Faster
 than [std::unordered_map](https://en.cppreference.com/w/cpp/container/unordered_map) for large sized workloads and comparable for small size workloads.

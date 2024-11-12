@@ -10,95 +10,48 @@
 // The above copyright notice and this permission notice shall be included in
 // all copies or substantial portions of the Software.
 
-#ifndef DRO_OA_HASHMAP
-#define DRO_OA_HASHMAP
+#ifndef DRO_DENSE_HASHMAP_HPP
+#define DRO_DENSE_HASHMAP_HPP
 
-#include <concepts>  // for requires
-#include <cstddef>   // for size_t, ptrdiff_t
-#include <cstdint>   // for uint64_t
-#include <functional>// for equal_to, hash
+#include <concepts>   // for requires
+#include <cstddef>    // for size_t, ptrdiff_t
+#include <cstdint>    // for uint64_t
+#include <functional> // for equal_to, hash
 #include <iterator>   // for pair, forward_iterator_tag
 #include <stdexcept>  // for out_of_range, invalid_argument
-#include <string_view>// for hash
 #include <type_traits>// for std::is_default_constructible
 #include <utility>    // for pair, forward, make_pair
 #include <vector>     // for allocator, vector
 
 namespace dro {
 namespace detail {
-namespace hashmix {
-
-// Improves the hash function for identity hash. i.e. std::hash, boost::hash
-// Template parameter bool HashMix = true (default) sets this On or Off
-// Only turn off if a high quality hash function is provided
-
-inline void mum(uint64_t* a, uint64_t* b) {
-#if defined(__SIZEOF_INT128__)
-  __uint128_t r = *a;
-  r *= *b;
-  *a = static_cast<uint64_t>(r);
-  *b = static_cast<uint64_t>(r >> 64U);
-#elif defined(_MSC_VER) && defined(_M_X64)
-  *a = _umul128(*a, *b, b);
-#else
-  uint64_t ha = *a >> 32U;
-  uint64_t hb = *b >> 32U;
-  uint64_t la = static_cast<uint32_t>(*a);
-  uint64_t lb = static_cast<uint32_t>(*b);
-  uint64_t hi {};
-  uint64_t lo {};
-  uint64_t rh  = ha * hb;
-  uint64_t rm0 = ha * lb;
-  uint64_t rm1 = hb * la;
-  uint64_t rl  = la * lb;
-  uint64_t t   = rl + (rm0 << 32U);
-  auto c       = static_cast<uint64_t>(t < rl);
-  lo           = t + (rm1 << 32U);
-  c += static_cast<uint64_t>(lo < t);
-  hi = rh + (rm0 >> 32U) + (rm1 >> 32U) + c;
-  *a = lo;
-  *b = hi;
-#endif
-}
-
-[[nodiscard]] inline auto mix(uint64_t& a, uint64_t&& b) -> uint64_t {
-  mum(&a, &b);
-  return a ^ b;
-}
-
-[[nodiscard]] inline auto hash(uint64_t&& x) -> uint64_t {
-  return mix(x, UINT64_C(0x9E3779B97F4A7C15));
-}
-}// namespace hashmix
 
 template <typename T>
-concept Hashmap_Type =
+concept densehash_t =
     std::is_default_constructible_v<T> &&
     (std::is_move_assignable_v<T> || std::is_copy_assignable_v<T>);
 
 template <typename T, typename... Args>
-concept Hashmap_NoThrow =
+concept densehash_nothrow =
     std::is_nothrow_constructible_v<T, Args&&...> &&
     ((std::is_nothrow_copy_assignable_v<T> && std::is_copy_assignable_v<T>) ||
      (std::is_nothrow_move_assignable_v<T> && std::is_move_assignable_v<T>));
 
 struct IsAHashSet {};
 
-template <Hashmap_Type Key> struct PairHashSet {
+template <densehash_t Key> struct hashset_pair {
   Key first;
   IsAHashSet second [[no_unique_address]];
-  PairHashSet() = default;
 };
 
-template <typename Pair> struct HashNode {
+template <typename Pair> struct hashnode {
   Pair pair_;
   // Least significant bit: 1 - Full, 0 - Empty
   uint64_t fingerprint_full_ {};
   uint64_t next_ {};// Index of next element in collision chain
-  HashNode() = default;
 };
 
-template <typename Container> struct HashIterator {
+template <typename Container> struct dense_iterator {
   using key_type        = typename Container::key_type;
   using mapped_type     = typename Container::mapped_type;
   using value_type      = typename Container::value_type;
@@ -117,21 +70,21 @@ template <typename Container> struct HashIterator {
                          const key_type*, const value_type*>;
   using iterator_category = std::forward_iterator_tag;
 
-  explicit HashIterator(Container* hashmap, size_type index)
-      : hashmap_(hashmap), index_(index) {
+  explicit dense_iterator(Container* hashbase, size_type index)
+      : hashbase_(hashbase), index_(index) {
     _nextValidIndex();
   }
 
-  bool operator==(const HashIterator& other) const {
-    return other.hashmap_ == hashmap_ && other.index_ == index_;
+  bool operator==(const dense_iterator& other) const {
+    return other.hashbase_ == hashbase_ && other.index_ == index_;
   }
 
-  bool operator!=(const HashIterator& other) const {
+  bool operator!=(const dense_iterator& other) const {
     return ! (*this == other);
   }
 
-  HashIterator& operator++() {
-    if (index_ < hashmap_->capacity_) {
+  dense_iterator& operator++() {
+    if (index_ < hashbase_->capacity_) {
       ++index_;
       _nextValidIndex();
     }
@@ -142,77 +95,77 @@ template <typename Container> struct HashIterator {
     requires(std::is_same_v<mapped_type, IsAHashSet> &&
              ! std::is_const_v<Container>)
   {
-    return hashmap_->buckets_[index_].pair_.first;
+    return hashbase_->buckets_[index_].pair_.first;
   }
 
   const_reference operator*() const
     requires(std::is_same_v<mapped_type, IsAHashSet> &&
              std::is_const_v<Container>)
   {
-    return hashmap_->buckets_[index_].pair_.first;
+    return hashbase_->buckets_[index_].pair_.first;
   }
 
   pointer operator->()
     requires(std::is_same_v<mapped_type, IsAHashSet> &&
              ! std::is_const_v<Container>)
   {
-    return &hashmap_->buckets_[index_].pair_.first;
+    return &hashbase_->buckets_[index_].pair_.first;
   }
 
   const_pointer operator->() const
     requires(std::is_same_v<mapped_type, IsAHashSet> &&
              std::is_const_v<Container>)
   {
-    return &hashmap_->buckets_[index_].pair_.first;
+    return &hashbase_->buckets_[index_].pair_.first;
   }
 
   reference operator*()
     requires(! std::is_same_v<mapped_type, IsAHashSet> &&
              ! std::is_const_v<Container>)
   {
-    return hashmap_->buckets_[index_].pair_;
+    return hashbase_->buckets_[index_].pair_;
   }
 
   const_reference operator*() const
     requires(! std::is_same_v<mapped_type, IsAHashSet> &&
              std::is_const_v<Container>)
   {
-    return hashmap_->buckets_[index_].pair_;
+    return hashbase_->buckets_[index_].pair_;
   }
 
   pointer operator->()
     requires(! std::is_same_v<mapped_type, IsAHashSet> &&
              ! std::is_const_v<Container>)
   {
-    return &hashmap_->buckets_[index_].pair_;
+    return &hashbase_->buckets_[index_].pair_;
   }
 
   const_pointer operator->() const
     requires(! std::is_same_v<mapped_type, IsAHashSet> &&
              std::is_const_v<Container>)
   {
-    return &hashmap_->buckets_[index_].pair_;
+    return &hashbase_->buckets_[index_].pair_;
   }
 
   void _nextValidIndex() {
-    const auto& buckets = hashmap_->buckets_;
-    while (index_ < hashmap_->capacity_ &&
-           ! hashmap_->_getFull(buckets[index_].fingerprint_full_)) {
+    const auto& buckets = hashbase_->buckets_;
+    while (index_ < hashbase_->capacity_ &&
+           ! hashbase_->_getFull(buckets[index_].fingerprint_full_)) {
       ++index_;
     }
   }
 
 private:
-  Container* hashmap_ = nullptr;
+  Container* hashbase_ = nullptr;
   size_type index_ {};
   friend Container;
 };
 
-template <Hashmap_Type Key, Hashmap_Type Value, typename Pair,
-          typename Hash = std::hash<Key>, bool HashMix = true,
+template <densehash_t Key, densehash_t Value, typename Pair,
+          typename Hash      = std::hash<Key>,
           typename KeyEqual  = std::equal_to<Key>,
-          typename Allocator = std::allocator<HashNode<Pair>>>
-class OAHashmap {
+          typename Allocator = std::allocator<hashnode<Pair>>>
+class dense_hashbase {
 public:
   using key_type        = Key;
   using mapped_type     = Value;
@@ -222,50 +175,48 @@ public:
   using key_equal       = KeyEqual;
   using allocator_type  = Allocator;
   using difference_type = std::ptrdiff_t;
-  using node            = HashNode<Pair>;
+  using node            = hashnode<Pair>;
   using buckets         = std::vector<node, Allocator>;
-  using iterator        = HashIterator<OAHashmap>;
-  using const_iterator  = HashIterator<const OAHashmap>;
+  using iterator        = dense_iterator<dense_hashbase>;
+  using const_iterator  = dense_iterator<const dense_hashbase>;
 
 private:
+  static constexpr bool densehash_nothrow_v = densehash_nothrow<key_type> &&
+                                              densehash_nothrow<mapped_type> &&
+                                              densehash_nothrow<value_type>;
   float load_factor_                     = 1.0F;
   static constexpr float hashable_ratio_ = 0.7F;
   buckets buckets_;
   size_type size_ {};
   size_type collision_head_ {};
   size_type collision_tail_ {};
-  Hash hash_ {};
+  hasher hash_ {};
+  key_equal equal_ {};
   size_type capacity_ {};
   size_type hashable_capacity_ {};
+
   friend iterator;
   friend const_iterator;
 
 public:
-  explicit OAHashmap(size_type count, const Allocator& allocator = Allocator())
-      : buckets_(allocator) {
-    if (count < 1) {
-      throw std::invalid_argument("Count must be positive number.");
+  explicit dense_hashbase(size_type capacity,
+                          const Allocator& allocator = Allocator())
+      : capacity_(capacity), buckets_(capacity, allocator) {
+    if (capacity < 1) {
+      throw std::invalid_argument("Capacity must be positive number.");
     }
-    capacity_ = count;
-    buckets_.resize(capacity_);
     hashable_capacity_ = static_cast<float>(capacity_) * hashable_ratio_;
     collision_head_    = hashable_capacity_;
     collision_tail_    = hashable_capacity_;
   }
-
-  // No memory allocated, this is redundant
-  ~OAHashmap()                           = default;
-  OAHashmap(const OAHashmap& other)      = default;
-  OAHashmap& operator=(const OAHashmap&) = default;
-  OAHashmap(OAHashmap&& other)           = default;
-  OAHashmap& operator=(OAHashmap&&)      = default;
 
   // Member Functions
   [[nodiscard]] allocator_type get_allocator() const noexcept {
     return buckets_.get_allocator();
   }
 
-  // Iterators
+  // Iterators //////////////
+
   iterator begin() noexcept { return iterator(this, 0); }
 
   const_iterator begin() const noexcept { return const_iterator(this, 0); }
@@ -282,7 +233,8 @@ public:
     return const_iterator(this, capacity_);
   }
 
-  // Capacity
+  // Capacity //////////////
+
   [[nodiscard]] bool empty() const noexcept { return ! size(); }
 
   [[nodiscard]] size_type size() const noexcept { return size_; }
@@ -291,7 +243,8 @@ public:
     return buckets_.max_size();
   }
 
-  // Modifiers
+  // Modifiers //////////////
+
   void clear() noexcept {
     for (auto& bucket : buckets_) {
       _setEmpty(bucket.fingerprint_full_);
@@ -302,30 +255,44 @@ public:
     collision_tail_ = hashable_capacity_;
   }
 
-  std::pair<iterator, bool> insert(const value_type& pair) {
+  std::pair<iterator, bool>
+  insert(const value_type& pair) noexcept(densehash_nothrow_v) {
     return _emplace(pair.first, pair.second);
   }
 
-  std::pair<iterator, bool> insert(value_type&& pair) {
+  std::pair<iterator, bool>
+  insert(value_type&& pair) noexcept(densehash_nothrow_v) {
     return _emplace(std::move(pair.first), std::move(pair.second));
   }
 
-  std::pair<iterator, bool> insert(const key_type& key)
+  std::pair<iterator, bool>
+  insert(const key_type& key) noexcept(densehash_nothrow_v)
     requires(std::is_same_v<mapped_type, IsAHashSet>)
   {
     return _emplace(key);
   }
 
-  std::pair<iterator, bool> insert(key_type&& key)
+  std::pair<iterator, bool> insert(key_type&& key) noexcept(densehash_nothrow_v)
     requires(std::is_same_v<mapped_type, IsAHashSet>)
   {
     return _emplace(std::move(key));
   }
 
-  template <typename P>
-    requires std::is_convertible_v<P, value_type>
-  std::pair<iterator, bool> insert(P&& value) {
-    return _emplace(value.first, std::move(value.second));
+  // template <typename P>
+  //   requires std::is_constructible_v<value_type, P&&>
+  // std::pair<iterator, bool> insert(P&& value) {
+  //   return _emplace(std::forward<P>(value));
+  // }
+
+  template <class InputIt> void insert(InputIt first, InputIt last) {
+    while (first != last) {
+      insert(*first);
+      ++first;
+    }
+  }
+
+  void insert(std::initializer_list<value_type> ilist) {
+    insert(ilist.begin(), ilist.end());
   }
 
   template <typename... Args>
@@ -364,21 +331,23 @@ public:
     return _erase(x);
   }
 
-  void swap(OAHashmap& other) noexcept {
-    std::swap(buckets_, other.buckets_);
-    std::swap(size_, other.size_);
-    std::swap(load_factor_, other.load_factor_);
-    std::swap(collision_head_, other.collision_head_);
-    std::swap(collision_tail_, other.collision_tail_);
-    std::swap(capacity_, other.capacity_);
-    std::swap(hashable_capacity_, other.hashable_capacity_);
+  void swap(dense_hashbase& other) noexcept {
+    // std::swap(buckets_, other.buckets_);
+    // std::swap(size_, other.size_);
+    // std::swap(load_factor_, other.load_factor_);
+    // std::swap(collision_head_, other.collision_head_);
+    // std::swap(collision_tail_, other.collision_tail_);
+    // std::swap(capacity_, other.capacity_);
+    // std::swap(hashable_capacity_, other.hashable_capacity_);
+    std::swap(*this, other);
   }
 
-  void merge(const OAHashmap& other) {
+  void merge(const dense_hashbase& other) {
     for (auto& elem : other) { _emplace(elem); }
   }
 
-  // Get Values
+  // Lookup //////////////
+
   mapped_type& at(const key_type& key)
     requires(! std::is_same_v<mapped_type, IsAHashSet>)
   {
@@ -386,7 +355,7 @@ public:
     if (index != capacity_) {
       return buckets_[index].pair_.second;
     }
-    throw std::out_of_range("OAHashmap::at");
+    throw std::out_of_range("dro::dense_hashbase::at");
   }
 
   const mapped_type& at(const key_type& key) const
@@ -396,7 +365,7 @@ public:
     if (index != capacity_) {
       return buckets_[index].pair_.second;
     }
-    throw std::out_of_range("OAHashmap::at");
+    throw std::out_of_range("dro::dense_hashbase::at");
   }
 
   template <typename K>
@@ -408,7 +377,7 @@ public:
     if (index != capacity_) {
       return buckets_[index].pair_.second;
     }
-    throw std::out_of_range("OAHashmap::at");
+    throw std::out_of_range("dro::dense_hashbase::at");
   }
 
   template <typename K>
@@ -420,7 +389,7 @@ public:
     if (index != capacity_) {
       return buckets_[index].pair_.second;
     }
-    throw std::out_of_range("OAHashmap::at");
+    throw std::out_of_range("dro::dense_hashbase::at");
   }
 
   mapped_type& operator[](const key_type& key)
@@ -517,14 +486,16 @@ public:
     return {first, second};
   }
 
-  // Bucket Interface
-  [[nodiscard]] size_type bucket_count() const { return capacity_; }
+  // Bucket Interface ///////
+
+  [[nodiscard]] size_type bucket_count() const noexcept { return capacity_; }
 
   [[nodiscard]] size_type max_bucket_count() const {
     return buckets_.max_size();
   }
 
-  // Hash Policy
+  // Hash Policy ///////
+
   [[nodiscard]] float load_factor() const {
     return static_cast<float>(size()) / static_cast<float>(max_bucket_count());
   }
@@ -549,10 +520,11 @@ public:
     }
   }
 
-  // Observers
+  // Observers ///////
+
   [[nodiscard]] hasher hash_function() const { return hash_; }
 
-  [[nodiscard]] key_equal key_eq() const { return key_equal(); }
+  [[nodiscard]] key_equal key_eq() const { return equal_; }
 
 private:
   template <typename... Args>
@@ -569,7 +541,7 @@ private:
       do {
         auto& bucket = buckets_[chainNode];
         if (fingerprint == _getFingerprint(bucket.fingerprint_full_) &&
-            key_equal()(bucket.pair_.first, key)) {
+            equal_(bucket.pair_.first, key)) {
           return std::make_pair(iterator(this, insert_index), false);
         }
         chainNode = bucket.next_;
@@ -648,13 +620,16 @@ private:
     key = non_movable;
   }
 
-  void _emplaceKey(const size_type& insert_index, key_type& key)
+  void _emplaceKey(const size_type& insert_index,
+                   key_type& key) noexcept(densehash_nothrow_v)
     requires(std::is_move_assignable_v<key_type>)
   {
     buckets_[insert_index].pair_.first = std::move(key);
   }
 
-  void _emplaceKey(const size_type& insert_index, key_type& key)
+  void _emplaceKey(const size_type& insert_index,
+                   key_type& key) noexcept(densehash_nothrow_v)
+
     requires(std::is_copy_assignable_v<key_type> &&
              ! std::is_move_assignable_v<key_type>)
   {
@@ -662,12 +637,14 @@ private:
   }
 
   template <typename... Args>
-  void _emplaceValue(const size_type& insert_index, Args&&... args)
+  void _emplaceValue(const size_type& insert_index, Args&&... args) noexcept
+
     requires(std::is_same_v<mapped_type, IsAHashSet>)
-  {}// Intentionally blank for HashSet
+  {}// Intentionally blank for hashset
 
   template <typename First, typename... Args>
-  void _emplaceValue(const size_type& insert_index, First&&, Args&&... args)
+  void _emplaceValue(const size_type& insert_index, First&&,
+                     Args&&... args) noexcept(densehash_nothrow_v)
     requires(! std::is_same_v<mapped_type, IsAHashSet> &&
              std::is_move_assignable_v<mapped_type> &&
              std::is_constructible_v<mapped_type, Args && ...>)
@@ -677,7 +654,8 @@ private:
   }
 
   template <typename First, typename... Args>
-  void _emplaceValue(const size_type& insert_index, First&&, Args&&... args)
+  void _emplaceValue(const size_type& insert_index, First&&,
+                     Args&&... args) noexcept(densehash_nothrow_v)
     requires(! std::is_same_v<mapped_type, IsAHashSet> &&
              std::is_copy_assignable_v<mapped_type> &&
              ! std::is_move_assignable_v<mapped_type> &&
@@ -704,8 +682,8 @@ private:
       std::swap(bucket, buckets_[next]);
       erase_index = next;
     } else {
-      size_type _prev_index_       = findLocation.second;
-      buckets_[_prev_index_].next_ = next;
+      size_type prev_index       = findLocation.second;
+      buckets_[prev_index].next_ = next;
     }
     _setEmpty(buckets_[erase_index].fingerprint_full_);
     buckets_[erase_index].next_ = 0;
@@ -723,26 +701,26 @@ private:
     uint64_t keyHash     = _hash(key);
     uint64_t fingerprint = _getFingerprint(keyHash);
     // This is to avoid needing a doubly linked list
-    size_type _prev_index_ {capacity_};
+    size_type prev_index {capacity_};
 
     for (size_type index = _index_from_hash(keyHash);;) {
       auto& bucket                   = buckets_[index];
       const auto& bucket_fingerprint = bucket.fingerprint_full_;
       if (_getFull(bucket_fingerprint) &&
           fingerprint == _getFingerprint(bucket_fingerprint) &&
-          key_equal()(bucket.pair_.first, key)) {
-        return {index, _prev_index_};
+          equal_(bucket.pair_.first, key)) {
+        return {index, prev_index};
       }
       if (index == 0) {
         break;
       }
-      _prev_index_ = index;
-      index        = bucket.next_;
+      prev_index = index;
+      index      = bucket.next_;
     }
-    return {capacity_, _prev_index_};
+    return {capacity_, prev_index};
   }
 
-  bool _validateLoadFactorNotExceeded() {
+  [[nodiscard]] bool _validateLoadFactorNotExceeded() {
     size_type max_capacity = static_cast<float>(capacity_) * load_factor_;
     if (size_ + 1 > max_capacity) {
       _rehash(capacity_ * 2);
@@ -751,7 +729,7 @@ private:
     return true;
   }
 
-  bool _validateCollisionHasSpace() {
+  [[nodiscard]] bool _validateCollisionHasSpace() {
     if (collision_head_ == capacity_) {
       _rehash(capacity_ * 2);
       return false;
@@ -760,7 +738,7 @@ private:
   }
 
   void _rehash(const size_type& count) {
-    OAHashmap other(count, get_allocator());
+    dense_hashbase other(count, get_allocator());
     for (auto it = begin(); it != end(); ++it) { other.insert(*it); }
     swap(other);
   }
@@ -774,17 +752,9 @@ private:
   template <typename K>
   [[nodiscard]] uint64_t _hash(const K& key) const
       noexcept(noexcept(Hash()(key)))
-    requires std::is_convertible_v<K, key_type> && (! HashMix)
+    requires std::is_convertible_v<K, key_type>
   {
     return hash_(key);
-  }
-
-  template <typename K>
-  [[nodiscard]] uint64_t _hash(K const& key) const
-      noexcept(noexcept(Hash()(key)))
-    requires std::is_convertible_v<K, key_type> && HashMix
-  {
-    return hashmix::hash(hash_(key));
   }
 
   void _setFingerprint(uint64_t& fingerprint_full,
@@ -811,39 +781,40 @@ private:
 };
 }// namespace detail
 
-template <detail::Hashmap_Type Key, detail::Hashmap_Type Value,
-          typename Hash = std::hash<Key>, bool HashMix = false,
+template <detail::densehash_t Key, detail::densehash_t Value,
+          typename Hash     = std::hash<Key>,
           typename KeyEqual = std::equal_to<Key>,
           typename Allocator =
-              std::allocator<detail::HashNode<std::pair<Key, Value>>>>
-class HashMap : public detail::OAHashmap<Key, Value, std::pair<Key, Value>,
-                                         Hash, HashMix, KeyEqual, Allocator> {
+              std::allocator<detail::hashnode<std::pair<Key, Value>>>>
+class dense_hashmap
+    : public detail::dense_hashbase<Key, Value, std::pair<Key, Value>, Hash,
+                                    KeyEqual, Allocator> {
   using size_type = std::size_t;
-  using base_type = detail::OAHashmap<Key, Value, std::pair<Key, Value>, Hash,
-                                      HashMix, KeyEqual, Allocator>;
+  using base_type = detail::dense_hashbase<Key, Value, std::pair<Key, Value>,
+                                           Hash, KeyEqual, Allocator>;
 
 public:
-  explicit HashMap(size_type count            = 1,
-                   const Allocator& allocator = Allocator())
-      : base_type(count, allocator) {}
+  explicit dense_hashmap(size_type capacity         = 2,
+                         const Allocator& allocator = Allocator())
+      : base_type(capacity, allocator) {}
 };
 
-template <detail::Hashmap_Type Key, typename Hash = std::hash<Key>,
-          bool HashMix = false, typename KeyEqual = std::equal_to<Key>,
+template <detail::densehash_t Key, typename Hash = std::hash<Key>,
+          typename KeyEqual = std::equal_to<Key>,
           typename Allocator =
-              std::allocator<detail::HashNode<detail::PairHashSet<Key>>>>
-class HashSet : public detail::OAHashmap<Key, detail::IsAHashSet,
-                                         detail::PairHashSet<Key>, Hash,
-                                         HashMix, KeyEqual, Allocator> {
+              std::allocator<detail::hashnode<detail::hashset_pair<Key>>>>
+class dense_hashset : public detail::dense_hashbase<Key, detail::IsAHashSet,
+                                                    detail::hashset_pair<Key>,
+                                                    Hash, KeyEqual, Allocator> {
   using size_type = std::size_t;
   using base_type =
-      detail::OAHashmap<Key, detail::IsAHashSet, detail::PairHashSet<Key>, Hash,
-                        HashMix, KeyEqual, Allocator>;
+      detail::dense_hashbase<Key, detail::IsAHashSet, detail::hashset_pair<Key>,
+                             Hash, KeyEqual, Allocator>;
 
 public:
-  explicit HashSet(size_type count            = 1,
-                   const Allocator& allocator = Allocator())
-      : base_type(count, allocator) {}
+  explicit dense_hashset(size_type capacity         = 2,
+                         const Allocator& allocator = Allocator())
+      : base_type(capacity, allocator) {}
 };
 
 }// namespace dro

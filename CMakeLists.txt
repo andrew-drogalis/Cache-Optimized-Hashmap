@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenAddressingHashmap)
+project(DroDenseHashmap)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,8 +21,6 @@ include(cmake/CompilerWarnings.cmake)
 include(cmake/Sanitizers.cmake)
 
 myproject_set_project_warnings(${PROJECT_NAME} TRUE "X" "" "" "X")
-
-add_compile_options(-pipe -fPIC)
 myproject_enable_sanitizers(${PROJECT_NAME} TRUE TRUE TRUE FALSE TRUE)
 
 # ------------------------------
