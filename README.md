@@ -1,4 +1,4 @@
-# Open Addressing Hashmap
+# Dense HashMap
 
 A STL compliant open addressing hashmap and hashset that uses linear probing to find the next available slots in the underlying vector. Faster
 than [std::unordered_map](https://en.cppreference.com/w/cpp/container/unordered_map) for large sized workloads and comparable for small size workloads.
@@ -14,12 +14,9 @@ than [std::unordered_map](https://en.cppreference.com/w/cpp/container/unordered_
 
 _Detailed Discussion_
 
-## _Beta Testing_
-
 ToDo:
 
 - [ ] 100% code coverage - currently ~80%.
-- [ ] Full support for "copy only" and "move only" keys and values
 
 ## Usage
 
@@ -42,11 +39,9 @@ The full list of template arguments are as follows:
 
 The default count is (1) and the std::allocator is the default memory allocator.
 
-- `HashMap<Key, Value> hashMap(key_type empty_key, size_type count = 1, const Allocator& allocator = Allocator());`
+- `HashMap<Key, Value> hashMap(size_type count = 1, const Allocator& allocator = Allocator());`
 
-- `HashSet<Key> hashSet(key_type empty_key, size_type count = 1, const Allocator& allocator = Allocator());`
-
-  The empty key is used to represent an empty slot in the hashmap, and cannot be inserted as a key.
+- `HashSet<Key> hashSet(size_type count = 1, const Allocator& allocator = Allocator());`
 
 #### Member Functions
 
@@ -218,7 +213,7 @@ For help with building the open addressing hashmap, I want to cite the following
 
 ## License
 
-This software is distributed under the GNU license. Please read [LICENSE](https://github.com/drogalis/Open-Addressing-Hashmap/blob/main/LICENSE) for information on the software availability and distribution.
+This software is distributed under the MIT license. Please read [LICENSE](https://github.com/drogalis/Open-Addressing-Hashmap/blob/main/LICENSE) for information on the software availability and distribution.
 
 ## Contribution
 
