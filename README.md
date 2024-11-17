@@ -1,7 +1,7 @@
-# Dense HashMap
+# Dense Hashmap
 
-A STL compliant open addressing hashmap and hashset that uses linear probing to find the next available slots in the underlying vector. Faster
-than [std::unordered_map](https://en.cppreference.com/w/cpp/container/unordered_map) for large sized workloads and comparable for small size workloads.
+A STL compliant open addressing hashmap and hashset that uses perfect hashing with a separate open addressing collision space. Faster
+than [std::unordered_map](https://en.cppreference.com/w/cpp/container/unordered_map) for all work loads, and uses a default load factor of `1.0` to maximize space efficiency.
 
 ## Table of Contents
 
@@ -14,10 +14,6 @@ than [std::unordered_map](https://en.cppreference.com/w/cpp/container/unordered_
 
 _Detailed Discussion_
 
-ToDo:
-
-- [ ] 100% code coverage - currently ~80%.
-
 ## Usage
 
 Main points:
@@ -25,7 +21,7 @@ Main points:
 - The key and value must be default constructible.
 - The key and value must be copy or move assignable.
 - Memory isn't deallocated on erase. Must wait on destructor.
-- _Weakness:_ All the iterators are invalidated on all modifying operations.
+<!-- - _Weakness:_ All the iterators are invalidated on all modifying operations. -->
 
 #### Constructor
 
@@ -189,7 +185,7 @@ Most important aspects of benchmarking:
 - Have at least one core isolated with isolcpus enabled in Grub.
 - Compile with -DCMAKE_BUILD_TYPE=Release
 
-<img src="https://raw.githubusercontent.com/drogalis/Open-Addressing-Hashmap/refs/heads/main/assets/Average%20Random%20Insertion%20%26%20Deletion%20Time.png" alt="Average Random Insertion & Deletion Time" style="padding-top: 10px;">
+<!-- <img src="https://raw.githubusercontent.com/drogalis/Open-Addressing-Hashmap/refs/heads/main/assets/Average%20Random%20Insertion%20%26%20Deletion%20Time.png" alt="Average Random Insertion & Deletion Time" style="padding-top: 10px;"> -->
 
 ## Installing
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(DroDenseHashmap)
+project(dro_dense_hashmap)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,7 +21,7 @@ include(cmake/CompilerWarnings.cmake)
 include(cmake/Sanitizers.cmake)
 
 myproject_set_project_warnings(${PROJECT_NAME} TRUE "X" "" "" "X")
-myproject_enable_sanitizers(${PROJECT_NAME} TRUE TRUE TRUE FALSE TRUE)
+myproject_enable_sanitizers(${PROJECT_NAME} TRUE TRUE TRUE FALSE FALSE)
 
 # ------------------------------
 # Install library
