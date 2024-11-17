@@ -1,7 +1,7 @@
 # Dense Hashmap
 
 A STL compliant open addressing hashmap and hashset that uses perfect hashing with a separate open addressing collision space. Faster
-than [std::unordered_map](https://en.cppreference.com/w/cpp/container/unordered_map) for all work loads, and uses a default load factor of `1.0` to maximize space efficiency.
+than [std::unordered_map](https://en.cppreference.com/w/cpp/container/unordered_map) for all work loads, and uses a default load factor of `1.0`.
 
 ## Table of Contents
 
