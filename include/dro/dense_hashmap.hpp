@@ -18,6 +18,7 @@
 #include <cstdint>    // for uint64_t
 #include <functional> // for equal_to, hash
 #include <iterator>   // for pair, forward_iterator_tag
+#include <limits>     // for numeric_limits
 #include <stdexcept>  // for out_of_range, invalid_argument
 #include <type_traits>// for std::is_default_constructible
 #include <utility>    // for pair, forward, make_pair
@@ -175,18 +176,34 @@ public:
   using key_equal       = KeyEqual;
   using allocator_type  = Allocator;
   using difference_type = std::ptrdiff_t;
-  using node            = hashnode<Pair>;
-  using buckets         = std::vector<node, Allocator>;
-  using iterator        = dense_iterator<dense_hashbase>;
-  using const_iterator  = dense_iterator<const dense_hashbase>;
+  using reference = std::conditional_t<std::is_same_v<mapped_type, IsAHashSet>,
+                                       key_type&, value_type&>;
+  using pointer   = std::conditional_t<std::is_same_v<mapped_type, IsAHashSet>,
+                                       key_type*, value_type*>;
+  using const_reference =
+      std::conditional_t<std::is_same_v<mapped_type, IsAHashSet>,
+                         const key_type&, const value_type&>;
+  using const_pointer =
+      std::conditional_t<std::is_same_v<mapped_type, IsAHashSet>,
+                         const key_type*, const value_type*>;
+
+  using node           = hashnode<Pair>;
+  using buckets        = std::vector<node, Allocator>;
+  using iterator       = dense_iterator<dense_hashbase>;
+  using const_iterator = dense_iterator<const dense_hashbase>;
 
 private:
   static constexpr bool densehash_nothrow_v = densehash_nothrow<key_type> &&
                                               densehash_nothrow<mapped_type> &&
                                               densehash_nothrow<value_type>;
-  float load_factor_     = 1.0F;
-  float hashable_ratio_  = 0.9F;
-  float growth_multiple_ = 2.0F;
+  static constexpr bool nothrow_swapable_v =
+      std::is_nothrow_swappable_v<buckets> &&
+      std::is_nothrow_swappable_v<Hash> &&
+      std::is_nothrow_swappable_v<KeyEqual>;
+
+  static constexpr float hashable_ratio_ = 0.82F;
+  float load_factor_                     = 1.0F;
+  float growth_multiple_                 = 2.0F;
   buckets buckets_;
   size_type size_ {};
   size_type collision_head_ {};
@@ -206,6 +223,10 @@ public:
     if (capacity < 1) {
       throw std::invalid_argument("Capacity must be positive number.");
     }
+    if (capacity == std::numeric_limits<size_type>::max()) {
+      throw std::overflow_error(
+          "Capacity must be less than numeric_limits<size_type>::max().");
+    }
     // Additional slot for last collision_head_
     buckets_.resize(capacity_ + 1);
     hashable_capacity_ = static_cast<float>(capacity_) * hashable_ratio_;
@@ -220,29 +241,33 @@ public:
 
   // Iterators //////////////
 
-  iterator begin() noexcept { return iterator(this, 0); }
+  constexpr iterator begin() noexcept { return iterator(this, 0); }
 
-  const_iterator begin() const noexcept { return const_iterator(this, 0); }
+  constexpr const_iterator begin() const noexcept {
+    return const_iterator(this, 0);
+  }
 
-  const_iterator cbegin() const noexcept { return const_iterator(this, 0); }
+  constexpr const_iterator cbegin() const noexcept {
+    return const_iterator(this, 0);
+  }
 
-  iterator end() noexcept { return iterator(this, capacity_); }
+  constexpr iterator end() noexcept { return iterator(this, capacity_); }
 
-  const_iterator end() const noexcept {
+  constexpr const_iterator end() const noexcept {
     return const_iterator(this, capacity_);
   }
 
-  const_iterator cend() const noexcept {
+  constexpr const_iterator cend() const noexcept {
     return const_iterator(this, capacity_);
   }
 
   // Capacity //////////////
 
-  [[nodiscard]] bool empty() const noexcept { return size_ == 0; }
+  [[nodiscard]] constexpr bool empty() const noexcept { return size_ == 0; }
 
-  [[nodiscard]] size_type size() const noexcept { return size_; }
+  [[nodiscard]] constexpr size_type size() const noexcept { return size_; }
 
-  [[nodiscard]] size_type max_size() const noexcept {
+  [[nodiscard]] constexpr size_type max_size() const noexcept {
     return buckets_.max_size();
   }
 
@@ -287,6 +312,32 @@ public:
     return _emplace(std::forward<P>(value));
   }
 
+  constexpr iterator insert(const_iterator /*hint*/, const value_type& value) {
+    return insert(value).first;
+  }
+
+  constexpr iterator insert(const_iterator /*hint*/, value_type&& value) {
+    return insert(std::move(value)).first;
+  }
+
+  constexpr iterator insert(const_iterator /*hint*/, const key_type& value)
+    requires(std::is_same_v<mapped_type, IsAHashSet>)
+  {
+    return insert(value).first;
+  }
+
+  constexpr iterator insert(const_iterator /*hint*/, key_type&& value)
+    requires(std::is_same_v<mapped_type, IsAHashSet>)
+  {
+    return insert(std::move(value)).first;
+  }
+
+  template <typename P>
+    requires std::is_convertible_v<P&&, key_type>
+  constexpr auto insert(const_iterator /*hint*/, P&& value) -> iterator {
+    return insert(std::forward<P>(value)).first;
+  }
+
   template <class InputIt> void insert(InputIt first, InputIt last) {
     while (first != last) {
       insert(*first);
@@ -298,9 +349,45 @@ public:
     insert(ilist.begin(), ilist.end());
   }
 
+  template <class M>
+  constexpr std::pair<iterator, bool> insert_or_assign(const key_type& k,
+                                                       M&& obj) {
+    auto result = try_emplace(k, std::forward<M>(obj));
+    if (! result.second) {
+      result.first->second = std::forward<M>(obj);
+    }
+    return result;
+  }
+
+  template <class M>
+  constexpr std::pair<iterator, bool> insert_or_assign(key_type&& k, M&& obj) {
+    auto result = try_emplace(std::move(k), std::forward<M>(obj));
+    if (! result.second) {
+      result.first->second = std::forward<M>(obj);
+    }
+    return result;
+  }
+
+  template <class M>
+  constexpr iterator insert_or_assign(const_iterator /*hint*/,
+                                      const key_type& k, M&& obj) {
+    return insert_or_assign(k, std::forward<M>(obj)).first;
+  }
+
+  template <class M>
+  constexpr iterator insert_or_assign(const_iterator /*hint*/, key_type&& k,
+                                      M&& obj) {
+    return insert_or_assign(std::move(k), std::forward<M>(obj)).first;
+  }
+
   template <typename... Args>
   std::pair<iterator, bool> emplace(Args&&... args) {
     return _emplace(std::forward<Args>(args)...);
+  }
+
+  template <class... Args>
+  iterator emplace_hint(const_iterator /*hint*/, Args&&... args) {
+    return emplace(std::forward<Args>(args)...).first;
   }
 
   iterator erase(iterator it) {
@@ -328,8 +415,9 @@ public:
     return _erase(x);
   }
 
-  // TBD noexcept
-  void swap(dense_hashbase& other) noexcept { std::swap(*this, other); }
+  void swap(dense_hashbase& other) noexcept(nothrow_swapable_v) {
+    std::swap(*this, other);
+  }
 
   void merge(const dense_hashbase& other) {
     for (const auto& elem : other) { _emplace(elem); }
@@ -497,19 +585,6 @@ public:
   [[nodiscard]] float max_load_factor() const { return load_factor_; }
 
   // Non-standard API
-  void hashable_ratio(float hashable_ratio) {
-    if (hashable_ratio <= 0 || hashable_ratio > 1) {
-      throw std::invalid_argument("dro::hashable_ratio: Argument must be "
-                                  "greater than zero and not greater than 1.");
-    }
-    hashable_ratio_    = hashable_ratio;
-    hashable_capacity_ = static_cast<float>(capacity_) * hashable_ratio_;
-    _validate_collision_space_bounds();
-  }
-
-  [[nodiscard]] float hashable_ratio() const { return hashable_ratio_; }
-
-  // Non-standard API
   void growth_multiple(float growth_multiple) {
     if (growth_multiple <= 1) {
       throw std::invalid_argument("dro::growth_multiple: Argument must be "
@@ -540,52 +615,31 @@ public:
   [[nodiscard]] key_equal key_eq() const { return equal_; }
 
 private:
+  // template <typename... Args>
+  // std::pair<iterator, bool> _emplace(Args&&... args) {
+  //   key_type key {};
+  //   _build_key(key, std::forward<Args>(args)...);
+  //   return _emplace(key, std::forward<Args>(args)...);
+  // }
+
   template <typename... Args>
   std::pair<iterator, bool> _emplace(Args&&... args) {
     key_type key {};
     _build_key(key, std::forward<Args>(args)...);
     uint64_t key_hash      = _hash(key);
-    uint64_t fingerprint   = _get_fingerprint(key_hash);
-    size_type insert_index = _index_from_hash(key_hash);
-
-    if (_get_full(buckets_[insert_index].fingerprint_full_)) {
-      // Check the collision chain
-      size_type chain_node {insert_index};
-      size_type prev_index {};
-      do {
-        auto& bucket = buckets_[chain_node];
-        if (fingerprint == _get_fingerprint(bucket.fingerprint_full_) &&
-            equal_(bucket.pair_.first, key)) {
-          return std::make_pair(iterator(this, insert_index), false);
-        }
-        prev_index = chain_node;
-        chain_node = bucket.next_;
-      } while (chain_node);
-      // Not in the hashmap, will 100% insert.
-      if (! _validate_load_factor_bounds()) {
-        return _emplace(std::forward<Args>(args)...);
-      }
-      // Insert at the end of the collisions vector
-      if (collision_tail_ == collision_head_) {
-        if (! _validate_collision_space_bounds()) {
-          return _emplace(std::forward<Args>(args)...);
-        }
-        insert_index = collision_head_;
-        ++collision_head_;
-        ++collision_tail_;
-      }
-      // Fill in the empty slots
-      else {
-        insert_index = buckets_[collision_head_].next_;
-        if (insert_index == collision_tail_) {
-          collision_tail_ = collision_head_;
-        } else {
-          buckets_[collision_head_].next_ = buckets_[insert_index].next_;
-        }
-      }
-      // Update collision chain
-      buckets_[prev_index].next_ = insert_index;
-    } else if (! _validate_load_factor_bounds()) {
+    auto find_locations    = _find_hash(key, key_hash);
+    size_type insert_index = find_locations.first;
+    if (insert_index != capacity_) {
+      return {iterator(this, insert_index), false};
+    }
+    // Not in the hashmap, will 100% insert.
+    if (! _validate_load_factor_bounds()) {
+      return _emplace(std::forward<Args>(args)...);
+    }
+    size_type prev_index = find_locations.second;
+    insert_index         = prev_index;
+    if (_get_full(buckets_[prev_index].fingerprint_full_) &&
+        ! _emplace_collisions(insert_index, prev_index)) {
       return _emplace(std::forward<Args>(args)...);
     }
     // Insert into hash base
@@ -594,7 +648,31 @@ private:
     _set_fingerprint(buckets_[insert_index].fingerprint_full_, key_hash);
     buckets_[insert_index].next_ = 0;
     ++size_;
-    return std::make_pair(iterator(this, insert_index), true);
+    return {iterator(this, insert_index), true};
+  }
+
+  bool _emplace_collisions(size_type& insert_index,
+                           const size_type& prev_index) {
+    // Insert at the end of the collisions vector
+    if (collision_tail_ == collision_head_) {
+      if (! _validate_collision_space_bounds()) {
+        return false;
+      }
+      insert_index = collision_head_;
+      ++collision_head_;
+      ++collision_tail_;
+    } else {
+      // Fill in the empty slots
+      insert_index = buckets_[collision_head_].next_;
+      if (insert_index == collision_tail_) {
+        collision_tail_ = collision_head_;
+      } else {
+        buckets_[collision_head_].next_ = buckets_[insert_index].next_;
+      }
+    }
+    // Update collision chain
+    buckets_[prev_index].next_ = insert_index;
+    return true;
   }
 
   template <typename First, typename... Args>
@@ -681,13 +759,14 @@ private:
   }
 
   size_type _erase(const key_type& key) {
-    auto find_locations   = _find(key);
-    size_type erase_index = find_locations.first;
+    auto find_locations    = _find(key);
+    size_type& erase_index = find_locations.first;
     if (erase_index == capacity_) {
       return 0U;
     }
-    auto& bucket   = buckets_[erase_index];
-    size_type next = bucket.next_;
+    // Definitely in the hash base
+    auto& bucket    = buckets_[erase_index];
+    size_type& next = bucket.next_;
     if (erase_index < hashable_capacity_) {
       if (next == 0) {
         _set_empty(bucket.fingerprint_full_);
@@ -697,15 +776,14 @@ private:
       std::swap(bucket, buckets_[next]);
       erase_index = next;
     } else {
-      size_type prev_index       = find_locations.second;
+      size_type& prev_index      = find_locations.second;
       buckets_[prev_index].next_ = next;
     }
     _set_empty(buckets_[erase_index].fingerprint_full_);
-    buckets_[erase_index].next_ = 0;
-    --size_;
-    // Add to collision linked list
+    buckets_[erase_index].next_     = 0;
     buckets_[collision_tail_].next_ = erase_index;
     collision_tail_                 = erase_index;
+    --size_;
     return 1U;
   }
 
@@ -713,11 +791,17 @@ private:
   std::pair<size_type, size_type> _find(const K& key) const
     requires std::is_convertible_v<K, key_type>
   {
-    uint64_t key_hash    = _hash(key);
-    uint64_t fingerprint = _get_fingerprint(key_hash);
-    // This is to avoid needing a doubly linked list
-    size_type prev_index {};
+    uint64_t key_hash = _hash(key);
+    return _find_hash(key, key_hash);
+  }
 
+  template <typename K>
+  std::pair<size_type, size_type> _find_hash(const K& key,
+                                             const uint64_t& key_hash) const
+    requires std::is_convertible_v<K, key_type>
+  {
+    size_type prev_index {};// This is to avoid needing a doubly linked list
+    uint64_t fingerprint = _get_fingerprint(key_hash);
     for (size_type index = _index_from_hash(key_hash);;) {
       auto& bucket                   = buckets_[index];
       const auto& bucket_fingerprint = bucket.fingerprint_full_;
@@ -726,11 +810,11 @@ private:
           equal_(bucket.pair_.first, key)) {
         return {index, prev_index};
       }
-      if (bucket.next_ == 0) {
-        break;
-      }
       prev_index = index;
       index      = bucket.next_;
+      if (index == 0) {
+        break;
+      }
     }
     return {capacity_, prev_index};
   }
@@ -748,8 +832,7 @@ private:
 
   [[nodiscard]] bool _validate_collision_space_bounds() {
     if (collision_head_ >= capacity_) {
-      auto capacity_float    = static_cast<float>(capacity_);
-      size_type new_capacity = capacity_float * growth_multiple_;
+      size_type new_capacity = static_cast<float>(capacity_) * growth_multiple_;
       _rehash(new_capacity);
       return false;
     }
